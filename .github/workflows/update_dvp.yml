@@ -38,3 +38,4 @@ jobs:
             --s2 "$ESPN_S2" \
             --swid "$ESPN_SWID" \
             --scoring "$SCORING"
+            --through 11
