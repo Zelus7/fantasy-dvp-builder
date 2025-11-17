@@ -310,7 +310,9 @@ def main():
 
     args = parser.parse_args()
 
+    log(f"[debug] raw argv: {sys.argv}")
     log(f"[debug] args.through = {args.through!r}")
+
 
     worker_url = args.worker_url
     league_id = args.leagueId
@@ -363,4 +365,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
