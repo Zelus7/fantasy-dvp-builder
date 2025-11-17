@@ -310,6 +310,8 @@ def main():
 
     args = parser.parse_args()
 
+    log(f"[debug] args.through = {args.through!r}")
+
     worker_url = args.worker_url
     league_id = args.leagueId
     s2 = args.s2
@@ -323,16 +325,20 @@ def main():
     if not swid.startswith("{"):
         swid = "{" + swid.strip("{}") + "}"
 
-    # 1) Determine currentWeek if not provided
+       # 1) Determine through_week
     if args.through is not None:
+        # Use CLI override and DO NOT call worker
         through_week = int(args.through)
-        log(f"[week] using provided through week: {through_week}")
+        log(f"[week] using through week from CLI: {through_week}")
     else:
+        # Fallback: ask the worker for current fantasy week
+        log("[week] no --through provided; calling worker /currentweek")
         through_week = get_current_week_from_worker(worker_url, season, league_id, s2, swid)
         log(f"[week] current fantasy week from Worker/ESPN: {through_week}")
 
     weeks = list(range(1, through_week + 1))
     log(f"[weeks] aggregating weeks {weeks[0]}–{weeks[-1]} (inclusive)")
+
 
     # 2) Load players once
     players = fetch_sleeper_players()
@@ -357,3 +363,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
