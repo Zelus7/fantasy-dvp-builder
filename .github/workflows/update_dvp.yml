@@ -10,6 +10,13 @@ jobs:
   build-and-upload-dvp:
     runs-on: ubuntu-latest
 
+    env:
+      WORKER_URL: ${{ secrets.WORKER_URL }}
+      LEAGUE_ID: ${{ secrets.LEAGUE_ID }}
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
+      SCORING: ${{ secrets.SCORING }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -25,17 +32,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build and upload DvP for all positions
-        env:
-          WORKER_URL: ${{ secrets.WORKER_URL }}
-          LEAGUE_ID: ${{ secrets.LEAGUE_ID }}
-          ESPN_S2: ${{ secrets.ESPN_S2 }}
-          ESPN_SWID: ${{ secrets.ESPN_SWID }}
-          SCORING: ${{ secrets.SCORING }}
         run: |
           python build_dvp_all.py \
             --worker-url "$WORKER_URL" \
             --leagueId "$LEAGUE_ID" \
             --s2 "$ESPN_S2" \
             --swid "$ESPN_SWID" \
-            --scoring "$SCORING"
+            --scoring "$SCORING" \
             --through 11
