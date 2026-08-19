@@ -1,0 +1,15 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+coverage/
+dist/
+*.log
+.DS_Store
+pipeline/output/
+extension/dist/
+
+__pycache__/
+*.py[cod]
