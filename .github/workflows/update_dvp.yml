@@ -1,42 +1,15 @@
-name: Update DvP KV
+name: Legacy DvP workflow (disabled)
 
 on:
-  schedule:
-    # Every Tuesday at 10:00 UTC (adjust as you like)
-    - cron: "0 10 * * TUE"
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
-  build-and-upload-dvp:
+  archived:
     runs-on: ubuntu-latest
-
-    env:
-      WORKER_URL: ${{ secrets.WORKER_URL }}
-      LEAGUE_ID: ${{ secrets.LEAGUE_ID }}
-      ESPN_S2: ${{ secrets.ESPN_S2 }}
-      ESPN_SWID: ${{ secrets.ESPN_SWID }}
-      SCORING: ${{ secrets.SCORING }}
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Build and upload DvP for all positions
-        run: |
-          python build_dvp_all.py \
-            --worker-url "$WORKER_URL" \
-            --leagueId "$LEAGUE_ID" \
-            --s2 "$ESPN_S2" \
-            --swid "$ESPN_SWID" \
-            --scoring "$SCORING" \
-            --through 11
+      - run: |
+          echo "This Cloudflare KV/Sleeper workflow has been retired."
+          echo "Use .github/workflows/refresh-data.yml for league-scoring nflverse datasets."

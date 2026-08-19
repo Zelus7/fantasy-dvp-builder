@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fantasy-command-center",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fantasy-command-center",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["15 10 * * TUE", "0 13 * * SUN"]
+  },
+  "vars": {
+    "DEFAULT_LEAGUE_ID": "1269378",
+    "GITHUB_REPOSITORY": "Zelus7/fantasy-dvp-builder",
+    "DATA_REFRESH_REF": "release/private-web-v1"
+  },
+  "observability": { "enabled": true }
+}

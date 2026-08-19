@@ -1,0 +1,50 @@
+name: Refresh NFL intelligence data
+
+on:
+  schedule:
+    - cron: "30 10 * * TUE"
+    - cron: "30 12 * * SUN"
+  workflow_dispatch:
+    inputs:
+      season:
+        description: Optional NFL season override
+        required: false
+      through_week:
+        description: Optional through-week override
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nfl-data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+      DATA_INGEST_TOKEN: ${{ secrets.DATA_INGEST_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+      - run: python -m pip install -r pipeline/requirements.txt
+      - name: Build and publish datasets
+        shell: bash
+        run: |
+          args=()
+          if [[ -n "${{ inputs.season }}" ]]; then args+=(--season "${{ inputs.season }}"); fi
+          if [[ -n "${{ inputs.through_week }}" ]]; then args+=(--through-week "${{ inputs.through_week }}"); fi
+          python pipeline/build_datasets.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nfl-intelligence-${{ github.run_id }}
+          path: pipeline/output/
+          if-no-files-found: ignore
+          retention-days: 14

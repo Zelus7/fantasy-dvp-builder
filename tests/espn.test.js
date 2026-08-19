@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { allLeaguePlayers, buildOpponentLookup, normalizeLeagueBundle, selectedOpponent, selectedTeam } from '../src/espn.js';
+
+const stored={leagueId:'1269378',leagueName:'Test League',teamId:'1',teamName:'My Team',seasonYear:2026};
+const body={id:1269378,seasonId:2026,scoringPeriodId:4,status:{currentMatchupPeriod:4},settings:{name:'Test League',rosterSettings:{rosterSize:3,lineupSlotCounts:{0:1,4:1,20:1}},scoringSettings:{scoringItems:[{statId:53,points:.5},{statId:3,points:.04}]},scheduleSettings:{matchupPeriodCount:14,playoffTeamCount:6}},teams:[{id:1,location:'Miami',nickname:'Managers',roster:{entries:[{lineupSlotId:4,playerPoolEntry:{player:{id:101,fullName:'Receiver One',defaultPositionId:4,eligibleSlots:[4,23],proTeamId:15,injuryStatus:'ACTIVE',stats:[{statSourceId:1,statSplitTypeId:1,appliedTotal:12.4}]}}}]}},{id:2,location:'Other',nickname:'Team',roster:{entries:[{lineupSlotId:2,playerPoolEntry:{player:{id:202,fullName:'Runner Two',defaultPositionId:2,eligibleSlots:[2,23],proTeamId:2,injuryStatus:'QUESTIONABLE'}}}]}}],schedule:[{id:9,matchupPeriodId:4,home:{teamId:1,totalProjectedPoints:105},away:{teamId:2,totalProjectedPoints:100}}]};
+
+test('league normalization preserves exact scoring and roster eligibility',()=>{const result=normalizeLeagueBundle(body,stored);assert.equal(result.league.scoringType,'half');assert.equal(result.league.currentWeek,4);assert.equal(result.teams[0].roster[0].projectedPoints,12.4);assert.deepEqual(result.teams[0].roster[0].eligibleSlotIds,[4,23]);assert.equal(result.currentMatchup.projectionMargin,5)});
+test('selected team and opponent resolve from stored ESPN team id',()=>{const result=normalizeLeagueBundle(body,stored);assert.equal(selectedTeam(result).id,'1');assert.equal(selectedOpponent(result).id,'2')});
+test('all league players retain fantasy-team ownership',()=>{const result=normalizeLeagueBundle(body,stored),players=allLeaguePlayers(result);assert.equal(players.length,2);assert.equal(players.find(player=>player.playerId==='202').fantasyTeamName,'Other Team')});
+test('NFL opponent lookup is bidirectional',()=>{const game={eventId:'g',homeTeam:'MIA',awayTeam:'BUF'};const lookup=buildOpponentLookup([game]);assert.equal(lookup.MIA.opponent,'BUF');assert.equal(lookup.BUF.opponent,'MIA')});

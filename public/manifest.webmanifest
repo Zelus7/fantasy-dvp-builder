@@ -1,0 +1,12 @@
+{
+  "name":"Fantasy Command Center",
+  "short_name":"Fantasy CC",
+  "description":"Private ESPN fantasy football lineup, matchup, waiver, and trade intelligence.",
+  "start_url":"/",
+  "scope":"/",
+  "display":"standalone",
+  "background_color":"#0b110d",
+  "theme_color":"#101a13",
+  "orientation":"portrait-primary",
+  "icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
