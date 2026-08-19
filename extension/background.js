@@ -1,0 +1,8 @@
+const ESPN_URLS=['https://www.espn.com/','https://fantasy.espn.com/'];
+async function config(){return chrome.storage.local.get(['appUrl','deviceToken'])}
+async function cookie(name){for(const url of ESPN_URLS){const value=await chrome.cookies.get({url,name});if(value?.value)return value.value}return null}
+async function sync(reason='background'){const saved=await config();if(!saved.appUrl||!saved.deviceToken)return{skipped:true};const[swid,s2]=await Promise.all([cookie('SWID'),cookie('espn_s2')]);if(!swid||!s2)return{skipped:true,reason:'cookies_not_found'};const response=await fetch(`${saved.appUrl.replace(/\/$/,'')}/api/extension/sync`,{method:'POST',headers:{Authorization:`Bearer ${saved.deviceToken}`,'Content-Type':'application/json'},body:JSON.stringify({cookies:{swid,s2},reason})});if(!response.ok){if(response.status===401)await chrome.storage.local.remove(['deviceToken','deviceId']);throw new Error(`Sync failed (${response.status})`)}const data=await response.json();await chrome.storage.local.set({lastSyncAt:new Date().toISOString(),leagueCount:data.leagues?.length||0});return data}
+chrome.runtime.onInstalled.addListener(()=>chrome.alarms.create('fcc-sync',{periodInMinutes:360}));
+chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name==='fcc-sync')sync('periodic').catch(()=>{})});
+chrome.cookies.onChanged.addListener(change=>{if(['SWID','espn_s2'].includes(change.cookie?.name)&&!change.removed)sync('cookie_changed').catch(()=>{})});
+chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{if(message?.type==='SYNC_NOW'){sync('manual').then(data=>sendResponse({ok:true,data})).catch(error=>sendResponse({ok:false,error:error.message}));return true}return false});
