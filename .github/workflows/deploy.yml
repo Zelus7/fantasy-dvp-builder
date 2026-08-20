@@ -17,8 +17,7 @@ jobs:
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_ACCOUNT_ID: 3cc20c2dc4ee5898413c75d56bced9c8
       APP_ACCESS_CODE: ${{ secrets.APP_ACCESS_CODE }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
       CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
@@ -37,8 +36,6 @@ jobs:
           missing=()
           for name in \
             CLOUDFLARE_API_TOKEN \
-            CLOUDFLARE_ACCOUNT_ID \
-            D1_DATABASE_ID \
             APP_ACCESS_CODE \
             SESSION_SECRET \
             CREDENTIAL_ENCRYPTION_KEY \
@@ -51,20 +48,6 @@ jobs:
           fi
 
       - run: npm install
-
-      - name: Inject D1 database ID
-        run: |
-          python - <<'PY'
-          import json, os
-          path = 'wrangler.jsonc'
-          with open(path, encoding='utf-8') as source:
-              data = json.load(source)
-          data['d1_databases'][0]['database_id'] = os.environ['D1_DATABASE_ID']
-          with open(path, 'w', encoding='utf-8') as target:
-              json.dump(data, target, indent=2)
-              target.write('\n')
-          PY
-
       - run: npm run ci
 
       - name: Apply D1 migrations
