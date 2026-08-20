@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "fantasy-command-center",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "4811b3fa-66a1-4872-92f7-adcbfb633860",
       "migrations_dir": "migrations"
     }
   ],
