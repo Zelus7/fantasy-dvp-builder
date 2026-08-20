@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "fantasy-command-center",
   "main": "src/index.js",
-  "compatibility_date": "2026-08-19",
+  "compatibility_date": "2026-08-20",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./public",
@@ -18,6 +18,14 @@
       "migrations_dir": "migrations"
     }
   ],
+  "secrets": {
+    "required": [
+      "APP_ACCESS_CODE",
+      "SESSION_SECRET",
+      "CREDENTIAL_ENCRYPTION_KEY",
+      "DATA_INGEST_TOKEN"
+    ]
+  },
   "triggers": {
     "crons": ["15 10 * * TUE", "0 13 * * SUN"]
   },
