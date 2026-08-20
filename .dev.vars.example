@@ -1,0 +1,7 @@
+# Copy to .dev.vars only for local development. Never commit real values.
+# Cloudflare Workers Builds can use these names to prompt for secrets.
+
+APP_ACCESS_CODE=choose-a-unique-private-passphrase
+SESSION_SECRET=generate-at-least-32-random-bytes
+CREDENTIAL_ENCRYPTION_KEY=base64-encoded-32-byte-aes-key
+DATA_INGEST_TOKEN=generate-at-least-32-random-bytes
