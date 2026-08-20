@@ -6,7 +6,8 @@
   "description": "Private ESPN fantasy football decision app with league-specific DvP, lineup, waiver, and trade analysis.",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run db:migrate:remote && wrangler deploy",
+    "deploy:worker": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "test": "node --test tests/*.test.js",
@@ -16,6 +17,25 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "cloudflare": {
+    "bindings": {
+      "APP_ACCESS_CODE": {
+        "description": "Private passphrase used to open the Fantasy Command Center. Use a unique passphrase of at least 16 characters."
+      },
+      "SESSION_SECRET": {
+        "description": "Random session-signing secret. Generate at least 32 random bytes."
+      },
+      "CREDENTIAL_ENCRYPTION_KEY": {
+        "description": "Base64-encoded 32-byte AES key used to encrypt ESPN session cookies at rest."
+      },
+      "DATA_INGEST_TOKEN": {
+        "description": "Random token used only by the trusted NFL dataset ingestion process. Generate at least 32 random bytes."
+      },
+      "DB": {
+        "description": "Existing D1 database fantasy-command-center."
+      }
+    }
   },
   "devDependencies": {
     "wrangler": "4.124.0"
