@@ -11,6 +11,8 @@ dist/
 pipeline/output/
 extension/dist/
 backups/
+.artifacts/
+worker-configuration.d.ts
 
 __pycache__/
 *.py[cod]
