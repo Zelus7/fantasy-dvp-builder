@@ -47,7 +47,7 @@ jobs:
             exit 1
           fi
 
-      - run: npm install
+      - run: npm ci
       - run: npm run ci
 
       - name: Apply D1 migrations

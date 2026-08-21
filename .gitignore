@@ -10,6 +10,10 @@ dist/
 .DS_Store
 pipeline/output/
 extension/dist/
+backups/
+.artifacts/
+worker-configuration.d.ts
 
 __pycache__/
 *.py[cod]
+.venv/
