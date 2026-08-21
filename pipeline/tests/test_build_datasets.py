@@ -1,7 +1,8 @@
 import unittest
+from unittest.mock import patch
 import pandas as pd
 
-from pipeline.build_datasets import dvp_rows, feature_rows, grade, prior_weight, schedule_rows, score_row
+from pipeline.build_datasets import dvp_rows, feature_rows, grade, load_player_stats_with_preseason_fallback, prior_weight, schedule_rows, score_row
 
 SCORING=[{'statId':3,'points':.04},{'statId':4,'points':4},{'statId':20,'points':-2},{'statId':24,'points':.1},{'statId':25,'points':6},{'statId':42,'points':.1},{'statId':43,'points':6},{'statId':53,'points':.5},{'statId':72,'points':-2}]
 PLAYERS=pd.DataFrame([
@@ -55,5 +56,22 @@ class PipelineTests(unittest.TestCase):
   self.assertEqual(rows[0]['homeTeam'],'WSH')
   self.assertEqual(rows[0]['awayTeam'],'JAX')
   self.assertTrue(rows[0]['kickoff'].endswith('Z'))
+
+ def test_missing_current_player_stats_uses_prior_season(self):
+  prior=pd.DataFrame([{'season':2025,'week':1}])
+  def load(_name,seasons):
+   if seasons==[2026]: raise ConnectionError('404 Client Error: stats_player_week_2026.parquet')
+   return prior
+  with patch('pipeline.build_datasets.load_nflreadpy',side_effect=load):
+   result=load_player_stats_with_preseason_fallback([2026])
+  self.assertEqual(result['season'].tolist(),[2025])
+
+ def test_current_player_stats_network_failure_does_not_fall_back(self):
+  def load(_name,seasons):
+   if seasons==[2026]: raise ConnectionError('connection timed out')
+   return pd.DataFrame([{'season':2025,'week':1}])
+  with patch('pipeline.build_datasets.load_nflreadpy',side_effect=load):
+   with self.assertRaisesRegex(ConnectionError,'timed out'):
+    load_player_stats_with_preseason_fallback([2026])
 
 if __name__=='__main__': unittest.main()

@@ -10,6 +10,8 @@ dist/
 .DS_Store
 pipeline/output/
 extension/dist/
+backups/
 
 __pycache__/
 *.py[cod]
+.venv/

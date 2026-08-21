@@ -91,6 +91,20 @@ def load_nflreadpy(name:str,seasons:Sequence[int]|None=None)->pd.DataFrame:
         except TypeError: pass
     raise RuntimeError(f'Could not call nflreadpy.{name}')
 
+def load_player_stats_with_preseason_fallback(seasons:Sequence[int])->pd.DataFrame:
+    requested={int(season) for season in seasons}; frames=[]
+    for season in sorted(requested|{season-1 for season in requested}):
+        try: frame=load_nflreadpy('load_player_stats',[season])
+        except Exception as error:
+            message=str(error)
+            missing_release='404 Client Error' in message and f'stats_player_week_{season}.parquet' in message
+            if season in requested and missing_release:
+                print(f'Player stats for {season} are not published yet; using the {season-1} baseline.',file=sys.stderr)
+                continue
+            raise
+        if not frame.empty: frames.append(frame)
+    return pd.concat(frames,ignore_index=True) if frames else pd.DataFrame()
+
 def player_maps(players:pd.DataFrame)->tuple[dict[str,dict[str,Any]],dict[str,str]]:
     by_gsis={}; espn={}
     for row in players.to_dict('records'):
@@ -188,7 +202,7 @@ def main()->int:
     if not base or not token: raise RuntimeError('APP_BASE_URL and DATA_INGEST_TOKEN are required')
     config=requests.get(f"{base.rstrip('/')}/api/internal/pipeline/config",headers={'Authorization':f'Bearer {token}'},timeout=30);config.raise_for_status();leagues=config.json().get('leagues') or []
     if not leagues: raise RuntimeError('No connected football leagues')
-    seasons=sorted({int(args.season or league['seasonYear']) for league in leagues});stats=to_pandas(load_nflreadpy('load_player_stats',sorted(set(seasons)|{s-1 for s in seasons})));players=to_pandas(load_nflreadpy('load_players'));schedules=to_pandas(load_nflreadpy('load_schedules',seasons));output=Path(args.output_dir)
+    seasons=sorted({int(args.season or league['seasonYear']) for league in leagues});stats=load_player_stats_with_preseason_fallback(seasons);players=to_pandas(load_nflreadpy('load_players'));schedules=to_pandas(load_nflreadpy('load_schedules',seasons));output=Path(args.output_dir)
     schedule_payloads={}
     for season in seasons:
         rows=schedule_rows(schedules,season)
