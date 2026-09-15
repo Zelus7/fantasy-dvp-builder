@@ -31,6 +31,7 @@
   },
   "vars": {
     "DEFAULT_LEAGUE_ID": "1269378",
+    "DEFAULT_TEAM_ID": "9",
     "GITHUB_REPOSITORY": "Zelus7/fantasy-dvp-builder",
     "DATA_REFRESH_REF": "release/private-web-v1"
   },

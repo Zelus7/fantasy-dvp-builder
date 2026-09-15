@@ -198,9 +198,14 @@ def upload(base,token,path,payload):
 def write(directory:Path,name:str,payload):directory.mkdir(parents=True,exist_ok=True);(directory/name).write_text(json.dumps(payload,indent=2,allow_nan=False)+'\n')
 
 def main()->int:
-    parser=argparse.ArgumentParser();parser.add_argument('--season',type=int);parser.add_argument('--through-week',type=int);parser.add_argument('--no-upload',action='store_true');parser.add_argument('--output-dir',default='pipeline/output');args=parser.parse_args();base=os.environ.get('APP_BASE_URL');token=os.environ.get('DATA_INGEST_TOKEN')
-    if not base or not token: raise RuntimeError('APP_BASE_URL and DATA_INGEST_TOKEN are required')
-    config=requests.get(f"{base.rstrip('/')}/api/internal/pipeline/config",headers={'Authorization':f'Bearer {token}'},timeout=30);config.raise_for_status();leagues=config.json().get('leagues') or []
+    parser=argparse.ArgumentParser();parser.add_argument('--season',type=int);parser.add_argument('--through-week',type=int);parser.add_argument('--no-upload',action='store_true');parser.add_argument('--config-file');parser.add_argument('--output-dir',default='pipeline/output');args=parser.parse_args();base=os.environ.get('APP_BASE_URL');token=os.environ.get('DATA_INGEST_TOKEN')
+    if args.config_file:
+        if not args.no_upload: raise RuntimeError('--config-file requires --no-upload; validate local output before publishing')
+        config=json.loads(Path(args.config_file).read_text())
+    else:
+        if not base or not token: raise RuntimeError('APP_BASE_URL and DATA_INGEST_TOKEN are required')
+        response=requests.get(f"{base.rstrip('/')}/api/internal/pipeline/config",headers={'Authorization':f'Bearer {token}'},timeout=30);response.raise_for_status();config=response.json()
+    leagues=config.get('leagues') or []
     if not leagues: raise RuntimeError('No connected football leagues')
     seasons=sorted({int(args.season or league['seasonYear']) for league in leagues});stats=load_player_stats_with_preseason_fallback(seasons);players=to_pandas(load_nflreadpy('load_players'));schedules=to_pandas(load_nflreadpy('load_schedules',seasons));output=Path(args.output_dir)
     schedule_payloads={}

@@ -7,8 +7,40 @@ const LEAGUE_API='https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl';
 const NFL_SCOREBOARD='https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
 function swid(value){const clean=String(value||'').trim().replace(/[{}]/g,'');return clean?`{${clean}}`:''}
 function headers(credentials,filter=null){return{Cookie:`SWID=${swid(credentials.swid)}; espn_s2=${credentials.s2}`,Accept:'application/json','User-Agent':'Mozilla/5.0 FantasyCommandCenter/0.1',...(filter?{'x-fantasy-filter':JSON.stringify(filter)}:{})}}
-async function fetchJson(url,options={},label='ESPN'){let response;try{response=await fetch(url,{...options,signal:AbortSignal.timeout(15000)})}catch(error){throw new HttpError(502,'UPSTREAM_UNAVAILABLE',`${label} could not be reached`,{reason:error?.name||'network_error'})}if([401,403].includes(response.status))throw new HttpError(401,'ESPN_AUTH_EXPIRED','ESPN connection expired. Sign into ESPN in the paired browser and resync.');if(!response.ok)throw new HttpError(502,'ESPN_UPSTREAM_ERROR',`${label} returned ${response.status}`,{response:(await response.text()).slice(0,200)});try{return await response.json()}catch{throw new HttpError(502,'ESPN_INVALID_RESPONSE',`${label} returned invalid JSON`)}}
-export async function discoverEspnLeagues(credentials){const value=swid(credentials.swid);if(!value||!credentials.s2)throw new HttpError(400,'ESPN_CREDENTIALS_REQUIRED','SWID and espn_s2 are required');const clean=value.replace(/[{}]/g,'');const body=await fetchJson(`${FAN_API}/${encodeURIComponent(value)}?displayEvents=true`,{headers:{...headers(credentials),'x-p13n-swid':clean,'X-Personalization-Source':'ESPN.com - FAM'}},'ESPN Fan API');const leagues=[];for(const pref of body.preferences||[]){const entry=pref?.metaData?.entry;if(pref?.type?.code!=='fantasy'||Number(entry?.gameId)!==1)continue;const group=entry?.groups?.[0];if(!group?.groupId)continue;leagues.push({sport:'football',leagueId:String(group.groupId),leagueName:group.groupName||`League ${group.groupId}`,teamId:String(entry.entryId||''),teamName:entry.entryMetadata?.teamName||'',seasonYear:Number(entry.seasonId||currentNflSeason())})}if(!leagues.length)throw new HttpError(404,'NO_ESPN_LEAGUES','No ESPN fantasy football leagues were found for this account');return leagues}
+async function fetchJson(url,options={},label='ESPN'){let response;try{response=await fetch(url,{...options,signal:AbortSignal.timeout(15000)})}catch(error){throw new HttpError(502,'UPSTREAM_UNAVAILABLE',`${label} could not be reached`,{reason:error?.name||'network_error'})}if([401,403].includes(response.status)&&options.headers?.Cookie)throw new HttpError(502,'ESPN_AUTH_EXPIRED','ESPN connection expired. Sign into ESPN in the paired browser and resync.');if(!response.ok)throw new HttpError(502,'ESPN_UPSTREAM_ERROR',`${label} returned ${response.status}`,{upstreamStatus:response.status});try{return await response.json()}catch{throw new HttpError(502,'ESPN_INVALID_RESPONSE',`${label} returned invalid JSON`)}}
+export async function discoverEspnLeagues(credentials,{leagueId=null,teamId=null,seasonYear=currentNflSeason()}={}){
+  const value=swid(credentials.swid);
+  if(!value||!credentials.s2)throw new HttpError(400,'ESPN_CREDENTIALS_REQUIRED','SWID and espn_s2 are required');
+  const clean=value.replace(/[{}]/g,'');
+  try{
+    const body=await fetchJson(`${FAN_API}/${encodeURIComponent(value)}?displayEvents=true`,{headers:{...headers(credentials),'x-p13n-swid':clean,'X-Personalization-Source':'ESPN.com - FAM'}},'ESPN Fan API');
+    const leagues=[];
+    for(const pref of body.preferences||[]){
+      const entry=pref?.metaData?.entry;
+      if(pref?.type?.code!=='fantasy'||Number(entry?.gameId)!==1)continue;
+      const group=entry?.groups?.[0];
+      if(!group?.groupId)continue;
+      leagues.push({sport:'football',leagueId:String(group.groupId),leagueName:group.groupName||`League ${group.groupId}`,teamId:String(entry.entryId||''),teamName:entry.entryMetadata?.teamName||'',seasonYear:Number(entry.seasonId||currentNflSeason())});
+    }
+    if(leagues.length)return leagues;
+    throw new HttpError(404,'NO_ESPN_LEAGUES','No ESPN fantasy football leagues were found for this account');
+  }catch(error){
+    // Account discovery is optional when ESPN grants access to a known league.
+    // Never turn an explicit authentication failure into a successful connection.
+    if(!leagueId||!['NO_ESPN_LEAGUES','ESPN_UPSTREAM_ERROR','UPSTREAM_UNAVAILABLE','ESPN_INVALID_RESPONSE'].includes(error?.code))throw error;
+  }
+  const body=await fetchJson(leagueUrl(encodeURIComponent(String(leagueId)),seasonYear,'?view=mSettings&view=mTeam'),{headers:headers(credentials)},'ESPN league API');
+  if(String(body.id)!==String(leagueId)||Number(body.seasonId)!==Number(seasonYear))throw new HttpError(502,'ESPN_INVALID_RESPONSE','ESPN returned a different league or season');
+  const ownerId=clean.toLowerCase();
+  const ownedTeams=(body.teams||[]).filter(team=>(team.owners||[]).some(owner=>swid(owner).slice(1,-1).toLowerCase()===ownerId));
+  // A configured team is a roster selection, not an authentication bypass.
+  // ESPN has already authorized this league read using the supplied cookies.
+  // Only use an explicit selection supplied by trusted Worker configuration.
+  const team=teamId!=null?(body.teams||[]).find(candidate=>String(candidate.id)===String(teamId)):(ownedTeams.length===1?ownedTeams[0]:null);
+  if(!team)throw new HttpError(409,'ESPN_TEAM_OWNERSHIP_UNVERIFIED',teamId!=null?'The configured team was not found in your ESPN league. Check the selected team ID.':'ESPN granted league access but could not identify your team automatically. Configure your team ID from the ESPN My Team link.');
+  if(String(body.id)!==String(leagueId)||Number(body.seasonId)!==Number(seasonYear)||!team.id)throw new HttpError(502,'ESPN_INVALID_RESPONSE','ESPN returned incomplete league information');
+  return[{sport:'football',leagueId:String(body.id),seasonYear:Number(body.seasonId),leagueName:body.settings?.name||`League ${body.id}`,teamId:String(team.id),teamName:teamRow(team).name}];
+}
 export async function discoverAndStoreLeagues(env,credentials){const leagues=await discoverEspnLeagues(credentials);await saveLeagues(env,leagues);await updateCredentialHealth(env,'connected');return leagues}
 export async function credentialsOrThrow(env){const value=await getCredentials(env);if(!value?.swid||!value?.s2)throw new HttpError(409,'ESPN_NOT_CONNECTED','Connect ESPN from Settings before using this feature');return value}
 function leagueUrl(leagueId,season,query=''){return `${LEAGUE_API}/seasons/${season}/segments/0/leagues/${leagueId}${query}`}

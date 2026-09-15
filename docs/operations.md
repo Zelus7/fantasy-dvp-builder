@@ -22,9 +22,33 @@ Symptom: `ESPN_AUTH_EXPIRED` or Settings shows `expired`.
 
 Recovery: sign into ESPN in the paired desktop browser and click **Sync ESPN now**. Do not edit GitHub secrets.
 
+Only `AUTH_REQUIRED` should send the website back to app login. An ESPN
+authentication failure is an upstream error (`ESPN_AUTH_EXPIRED`, HTTP 502), not
+an invalid app session or invalid connector pairing. A public scoreboard failure
+must not mark private ESPN credentials expired. The dashboard keeps the roster
+visible and labels missing schedule data explicitly.
+
+When Fan account discovery is unavailable, the Worker can read the configured
+league directly with the supplied ESPN cookies. `DEFAULT_TEAM_ID` is an explicit
+roster selection within that league; it does not bypass ESPN access checks.
+
 ### DvP missing or stale
 
 Run **Refresh NFL intelligence data** manually. Inspect the uploaded workflow artifact. The active D1 snapshot remains unchanged on failed validation.
+
+This requires the workflow to be registered on the repository default branch and
+`APP_BASE_URL` / `DATA_INGEST_TOKEN` configured in GitHub. Their presence must be
+verified; a deployed Worker alone does not enable dataset refreshes.
+
+For a recovery build without an ingestion credential, a locally supplied config
+in the pipeline-config API format can generate output without publishing:
+
+```bash
+.venv/bin/python pipeline/build_datasets.py --config-file .artifacts/pipeline-config.json --no-upload
+```
+
+Validate those outputs through the normal dataset validators before publishing.
+Do not commit private config, generated datasets, or credential material.
 
 ### No current-season stats
 
