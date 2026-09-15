@@ -1,6 +1,6 @@
 # Reliable decision support release
 
-Status: implemented and deployed; scheduled refresh awaits authorization. This checklist is the durable work record; checked items
+Status: implemented and deployed; scheduled refresh activation authorized and being verified. This checklist is the durable work record; checked items
 require evidence. Do not equate passing UI smoke tests with accurate advice.
 
 ## Scope and acceptance gates
@@ -152,3 +152,19 @@ GitHub application and pipeline CI both passed. The live `app.js` SHA-256
 matches the committed file. Post-deploy UI confirmed exact 9.82 / 5.44 / 0.00
 actual-score rendering, continued authentication, roster-linked headlines and
 future bye coverage gaps. Only scheduled pipeline activation remains gated.
+
+### Scheduled refresh activation, 2026-09-15
+
+- Alex explicitly authorized the scheduler-only main change, refresh secrets and
+  merging PR #6 when verification is complete. The app PR retains its existing
+  `release/private-web-v1` target; main receives only the refresh workflow.
+- Configured the GitHub app URL and shared ingestion token, then verified the
+  Worker's authenticated pipeline configuration endpoint (HTTP 200, one league).
+  Login/session/encryption secrets and installed connector pairing are unchanged.
+- Added whole-batch validation before any upload: complete regular-season
+  schedule, unique team/weeks and player IDs, full DvP coverage, minimum player
+  coverage, finite JSON values. An invalid final dataset prevents every upload.
+  All 23 Python tests pass, including nine publication regression cases; the
+  previously reconciled 272/384/661-row dataset batch passes the new gate.
+- Next: register the workflow, prove a real publishing run, merge after CI,
+  then point the scheduler at the stable release branch.

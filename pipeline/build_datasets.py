@@ -207,6 +207,42 @@ def upload(base,token,path,payload):
     if not response.ok: raise RuntimeError(f'{path} upload failed {response.status_code}: {response.text[:400]}')
 def write(directory:Path,name:str,payload):directory.mkdir(parents=True,exist_ok=True);(directory/name).write_text(json.dumps(payload,indent=2,allow_nan=False)+'\n')
 
+def validate_publication(payloads):
+    """Reject partial/malformed feeds before the first production upload."""
+    if not payloads: raise ValueError('No datasets to publish')
+    for path,payload in payloads:
+        json.dumps(payload,allow_nan=False)
+        rows=payload['rows']; season=payload['metadata']['season']
+        if path.endswith('/schedule'):
+            counts=defaultdict(int); team_weeks=set(); events=set()
+            for row in rows:
+                if row['season']!=season or not 1<=row['week']<=18 or row['homeTeam']==row['awayTeam'] or row['eventId'] in events:
+                    raise ValueError('Invalid schedule game')
+                events.add(row['eventId'])
+                for club in (row['homeTeam'],row['awayTeam']):
+                    key=(club,row['week'])
+                    if club not in TEAMS or key in team_weeks: raise ValueError('Invalid or duplicate schedule team-week')
+                    team_weeks.add(key); counts[club]+=1
+            expected=17 if season>=2021 else 16
+            if set(counts)!=TEAMS or any(n!=expected for n in counts.values()):
+                raise ValueError('Incomplete regular-season schedule')
+        elif path.endswith('/dvp'):
+            expected={(club,pos,window) for club in TEAMS for pos in POSITIONS for window in WINDOWS}
+            keys={(r['defenseTeam'],r['position'],r['window']) for r in rows}
+            if len(rows)!=len(expected) or keys!=expected or any(not math.isfinite(r['pointsAllowedPerGame']) or not 0<=r['percentile']<=100 for r in rows):
+                raise ValueError('Invalid or incomplete DvP coverage')
+        elif path.endswith('/player-features'):
+            ids=[str(r.get('espnId') or '') for r in rows]
+            if len(rows)<100 or len(set(ids))!=len(ids) or any(not i.isdigit() for i in ids) or any(not math.isfinite(r['seasonPpg']) for r in rows):
+                raise ValueError('Invalid or unexpectedly small player feature coverage')
+        else: raise ValueError('Unknown dataset destination')
+
+def publish_datasets(base,token,payloads):
+    validate_publication(payloads)
+    for path,payload in payloads:
+        upload(base,token,path,payload)
+        print(json.dumps({'published':path.rsplit('/',1)[-1],'rows':len(payload['rows']),'actualThroughWeek':payload['metadata']['throughWeek']}))
+
 def main()->int:
     parser=argparse.ArgumentParser();parser.add_argument('--season',type=int);parser.add_argument('--through-week',type=int);parser.add_argument('--no-upload',action='store_true');parser.add_argument('--config-file');parser.add_argument('--output-dir',default='pipeline/output');args=parser.parse_args();base=os.environ.get('APP_BASE_URL');token=os.environ.get('DATA_INGEST_TOKEN')
     if args.config_file:
@@ -218,17 +254,19 @@ def main()->int:
     leagues=config.get('leagues') or []
     if not leagues: raise RuntimeError('No connected football leagues')
     seasons=sorted({int(args.season or league['seasonYear']) for league in leagues});stats=load_player_stats_with_preseason_fallback(seasons);players=to_pandas(load_nflreadpy('load_players'));schedules=to_pandas(load_nflreadpy('load_schedules',seasons));output=Path(args.output_dir)
-    schedule_payloads={}
+    schedule_payloads={}; pending=[]
     for season in seasons:
         rows=schedule_rows(schedules,season)
         if not rows: raise RuntimeError(f'No schedule rows for {season}')
         payload={'metadata':{'season':season,'throughWeek':max(int(args.through_week or l.get('currentWeek') or 1) for l in leagues if int(args.season or l['seasonYear'])==season),'generatedAt':now(),'source':'nflverse schedules via nflreadpy'},'rows':rows};schedule_payloads[season]=payload;write(output,f'nfl-schedule-{season}.json',payload)
-        if not args.no_upload: upload(base,token,'/api/internal/pipeline/schedule',payload)
+        pending.append(('/api/internal/pipeline/schedule',payload))
     for league in leagues:
         season=int(args.season or league['seasonYear']);through=max(1,min(22,int(args.through_week or league.get('currentWeek') or 1)));current=stats[stats['season']==season] if 'season' in stats else pd.DataFrame();prior=stats[stats['season']==season-1] if 'season' in stats else pd.DataFrame();all_teams={r['homeTeam'] for r in schedule_payloads[season]['rows']}|{r['awayTeam'] for r in schedule_payloads[season]['rows']};items=league.get('scoringItems') or []
         coverage=data_coverage(current,through);actual=coverage['actualThroughWeek'];dvp,unknown1=dvp_rows(current,prior,players,items,season,actual,all_teams);features,unknown2=feature_rows(current,prior,players,items,season,actual);unknown=sorted(set(unknown1)|set(unknown2));metadata={'leagueId':str(league['leagueId']),'season':season,'throughWeek':actual,'requestedThroughWeek':through,**coverage,'generatedAt':now(),'source':'nflverse weekly player stats via nflreadpy','scoringType':league.get('scoringType'),'scoringHash':scoring_hash(items),'unsupportedScoring':[{'statId':x,'reason':'weekly feed cannot reproduce this rule exactly'} for x in unknown],'earlySeasonBlend':'prior season tapers out after six current games'};dvp_payload={'metadata':metadata,'rows':dvp};feature_payload={'metadata':metadata,'rows':features};write(output,f"dvp-{league['leagueId']}-{season}.json",dvp_payload);write(output,f"player-features-{league['leagueId']}-{season}.json",feature_payload)
-        if not args.no_upload: upload(base,token,'/api/internal/pipeline/dvp',dvp_payload);upload(base,token,'/api/internal/pipeline/player-features',feature_payload)
+        pending.extend([('/api/internal/pipeline/dvp',dvp_payload),('/api/internal/pipeline/player-features',feature_payload)])
         print(json.dumps({'leagueId':league['leagueId'],'season':season,'throughWeek':through,'dvpRows':len(dvp),'featureRows':len(features),'unsupportedScoring':unknown}))
+    if args.no_upload: validate_publication(pending)
+    else: publish_datasets(base,token,pending)
     return 0
 if __name__=='__main__':
     try: raise SystemExit(main())
