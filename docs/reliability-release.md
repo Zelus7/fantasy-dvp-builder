@@ -1,6 +1,6 @@
 # Reliable decision support release
 
-Status: implemented and deployed; scheduled refresh activation authorized and being verified. This checklist is the durable work record; checked items
+Status: implemented, deployed and verified. See PR #6 for merge state. This checklist is the durable work record; checked items
 require evidence. Do not equate passing UI smoke tests with accurate advice.
 
 ## Scope and acceptance gates
@@ -25,7 +25,7 @@ require evidence. Do not equate passing UI smoke tests with accurate advice.
   status, matchup context and accessible labels across player cards.
 - [x] Login/resume checks independent source freshness, retains last valid
   data, refreshes stale inputs and invalidates dependent recommendations.
-- [ ] Scheduled statistics refresh actually runs and publishes validated
+- [x] Scheduled statistics refresh actually runs and publishes validated
   snapshots. Failed/missing feeds remain visible and lower advice quality.
 - [x] Verified injury/news coverage, timestamped source links and no claims
   of complete current information when a source is unavailable.
@@ -166,5 +166,19 @@ future bye coverage gaps. Only scheduled pipeline activation remains gated.
   coverage, finite JSON values. An invalid final dataset prevents every upload.
   All 23 Python tests pass, including nine publication regression cases; the
   previously reconciled 272/384/661-row dataset batch passes the new gate.
-- Next: register the workflow, prove a real publishing run, merge after CI,
-  then point the scheduler at the stable release branch.
+- Registered six-hour polling on main. The first immediate dispatch returned
+  GitHub's transient workflow-registration 404; retry after registration passed.
+- Real run `34951660074` passed end to end and published 272 schedule rows,
+  384 DvP rows and 667 player-feature rows. Requested fantasy week is 2; actual
+  statistical source coverage remains week 1. No invented current-week stats.
+- Full local CI remains 73 JavaScript tests plus 23 Python tests, dry-run and
+  secret scan passing. GitHub application and pipeline CI passed on `2cfcc72`.
+- The ingestion secret update created Worker version
+  `acc673ab-a368-4877-838d-001a30e9b1a0`. Public app assets still match the shipped
+  code; process and D1 readiness checks return HTTP 200.
+- Live D1 verification confirms all three active snapshots came from the real
+  workflow run, with row counts matching its publication report.
+- Final workflow targets the stable release branch. Main's registration must
+  match it after the authorized merge; the Actions run history is the durable
+  evidence for subsequent publishing runs.
+- Alex's phone/product acceptance checklist is in `docs/user-test-checklist.md`.

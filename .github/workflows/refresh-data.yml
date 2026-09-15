@@ -42,9 +42,9 @@ jobs:
       - uses: actions/checkout@v6
         if: steps.preflight.outputs.ready == 'true'
         with:
-          # Registration may live on main while the private app remains on its
-          # explicitly approved development branch. Do not merge the app here.
-          ref: codex/deploy-private-v1
+          # GitHub schedules register on main; pipeline code lives on the
+          # stable private-app release branch, independently of feature branches.
+          ref: release/private-web-v1
 
       - uses: actions/setup-python@v6
         if: steps.preflight.outputs.ready == 'true'

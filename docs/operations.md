@@ -2,11 +2,19 @@
 
 ## Normal weekly cycle
 
-- Tuesday: rebuild prior-week statistics, DvP, player features, and schedules.
-- Sunday morning: rebuild the latest available inputs and refresh ESPN league cache.
+- Every six hours: GitHub rebuilds statistics, DvP, player features and schedules,
+  including newly published games and stat corrections. All datasets are
+  validated before the first upload; incomplete feeds fail visibly.
+- Tuesday and Sunday mornings: the Worker's separate cron refreshes ESPN cache.
 - User refresh: bypass short ESPN/weather caches for the selected league.
 
-Scheduled GitHub workflows only execute from the default branch. Until private v1 is merged, run refresh manually from the feature/release branch.
+The refresh workflow is registered on `main` and checks out
+`release/private-web-v1` for pipeline code. Its schedule is 00:33, 06:33,
+12:33 and 18:33 UTC (GitHub may delay scheduled jobs). Manual recovery uses
+**Actions → Refresh NFL intelligence data → Run workflow → main**.
+Leave season/week blank for the connected league's current settings. The source
+coverage week is reported separately from the requested fantasy week; a fresh
+download never implies that an unpublished NFL week is already available.
 
 ## Health checks
 
@@ -38,7 +46,16 @@ Run **Refresh NFL intelligence data** manually. Inspect the uploaded workflow ar
 
 This requires the workflow to be registered on the repository default branch and
 `APP_BASE_URL` / `DATA_INGEST_TOKEN` configured in GitHub. Their presence must be
-verified; a deployed Worker alone does not enable dataset refreshes.
+verified; a deployed Worker alone does not enable dataset refreshes. Both were
+configured and a real publishing run passed on September 15, 2026. Neither is
+your private app login code. Keep the ingestion token synchronized with the
+Worker secret of the same name, and never put it in source files or logs.
+
+Inspect the workflow's **Build and publish datasets** step and 14-day artifact
+after a failure. GitHub's normal workflow-failure notification preferences apply;
+the app also exposes source ages and withholds advice when critical inputs age
+out. A successful manual dispatch proves the publishing path, not that GitHub
+will execute every future timer without delay.
 
 For a recovery build without an ingestion credential, a locally supplied config
 in the pipeline-config API format can generate output without publishing:
