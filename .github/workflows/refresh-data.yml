@@ -2,8 +2,8 @@ name: Refresh NFL intelligence data
 
 on:
   schedule:
-    - cron: "30 10 * * TUE"
-    - cron: "30 12 * * SUN"
+    # Public feeds publish asynchronously; poll through stat corrections too.
+    - cron: "33 */6 * * *"
   workflow_dispatch:
     inputs:
       season:
@@ -33,14 +33,18 @@ jobs:
         shell: bash
         run: |
           if [[ -z "${APP_BASE_URL:-}" || -z "${DATA_INGEST_TOKEN:-}" ]]; then
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::NFL data refresh skipped because APP_BASE_URL or DATA_INGEST_TOKEN is not configured.'
+            echo '::error::NFL data refresh requires APP_BASE_URL and DATA_INGEST_TOKEN.'
+            exit 1
           else
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/checkout@v6
         if: steps.preflight.outputs.ready == 'true'
+        with:
+          # Registration may live on main while the private app remains on its
+          # explicitly approved development branch. Do not merge the app here.
+          ref: codex/deploy-private-v1
 
       - uses: actions/setup-python@v6
         if: steps.preflight.outputs.ready == 'true'
@@ -56,10 +60,19 @@ jobs:
       - name: Build and publish datasets
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
+        env:
+          REQUESTED_SEASON: ${{ inputs.season }}
+          REQUESTED_WEEK: ${{ inputs.through_week }}
         run: |
           args=()
-          if [[ -n "${{ inputs.season }}" ]]; then args+=(--season "${{ inputs.season }}"); fi
-          if [[ -n "${{ inputs.through_week }}" ]]; then args+=(--through-week "${{ inputs.through_week }}"); fi
+          if [[ -n "${REQUESTED_SEASON}" ]]; then
+            [[ "${REQUESTED_SEASON}" =~ ^[0-9]{4}$ ]] || exit 1
+            args+=(--season "${REQUESTED_SEASON}")
+          fi
+          if [[ -n "${REQUESTED_WEEK}" ]]; then
+            [[ "${REQUESTED_WEEK}" =~ ^([1-9]|1[0-8])$ ]] || exit 1
+            args+=(--through-week "${REQUESTED_WEEK}")
+          fi
           python pipeline/build_datasets.py "${args[@]}"
 
       - uses: actions/upload-artifact@v4

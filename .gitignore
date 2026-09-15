@@ -12,6 +12,9 @@ pipeline/output/
 extension/dist/
 backups/
 .artifacts/
+.playwright-cli/
+output/playwright/
+public/model/
 worker-configuration.d.ts
 
 __pycache__/

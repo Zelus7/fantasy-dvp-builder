@@ -5,6 +5,11 @@
   "type": "module",
   "description": "Private ESPN fantasy football decision app with league-specific DvP, lineup, waiver, and trade analysis.",
   "scripts": {
+    "build:model": "node scripts/build-browser-model.mjs",
+    "predev": "npm run build:model",
+    "predeploy": "npm run build:model",
+    "predeploy:worker": "npm run build:model",
+    "precheck:worker": "npm run build:model",
     "dev": "wrangler dev",
     "deploy": "npm run db:migrate:remote && wrangler deploy",
     "deploy:worker": "wrangler deploy",

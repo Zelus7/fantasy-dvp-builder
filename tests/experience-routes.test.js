@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import worker from '../src/index.js';
+import {saveCredentials,saveLeagues,cachePut,replaceScheduleDataset} from '../src/db.js';
+import {createSessionToken} from '../src/security.js';
+
+test('preferences, visit history and advice gates use the real schema behind authenticated routes',async t=>{
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));
+  const env={SESSION_SECRET:'fixture-signing-secret-32-characters',CREDENTIAL_ENCRYPTION_KEY:Buffer.alloc(32,2).toString('base64'),DB:{prepare(sql){const make=(args=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...args)||null},async all(){return{results:db.prepare(sql).all(...args)}},async run(){const r=db.prepare(sql).run(...args);return{meta:{changes:Number(r.changes)}}}});return make()},async batch(statements){const out=[];for(const s of statements)out.push(await s.run());return out}}};
+  await saveCredentials(env,{swid:'fixture-owner',s2:'fixture-cookie'});
+  const league={leagueId:'1',seasonYear:2026,teamId:'9',leagueName:'Fixture',teamName:'My fixture team',currentWeek:1,liveWeek:1,lineupSlotCounts:{4:1,20:2},rosterSize:3};
+  await saveLeagues(env,[league]);
+  const roster=[{playerId:'10',name:'Fixture receiver',position:'WR',proTeam:'BUF',projectedPoints:10,seasonProjectedPoints:170,actualPoints:0,eligibleSlotIds:[4,23],isStarter:true,lineupSlotId:4,injuryStatus:'ACTIVE'}];
+  const bundle={league,teams:[{id:'9',name:'My fixture team',roster}],schedule:[]};
+  await cachePut(env,'espn:v2:league:1:2026:current',bundle,180);
+  await cachePut(env,'nfl:news',{generatedAt:new Date().toISOString(),items:[]},180);
+  await replaceScheduleDataset(env,{metadata:{season:2026,throughWeek:1,generatedAt:new Date().toISOString()},rows:[{eventId:'fixture',week:1,homeTeam:'BUF',awayTeam:'MIA',kickoff:'2099-09-01T17:00:00Z'}]});
+  t.mock.method(globalThis,'fetch',async()=>{throw new Error('Unexpected external request')});
+  const session=await createSessionToken(env.SESSION_SECRET),headers={Cookie:`fcc_session=${session}`,'Content-Type':'application/json'};
+  const request=(path,body)=>worker.fetch(new Request(`https://fixture.example${path}`,{headers,...(body===undefined?{}:{method:'PUT',body:JSON.stringify(body)})}),env);
+  assert.equal((await worker.fetch(new Request('https://fixture.example/api/workspace'),env)).status,401);
+  const saved=await request('/api/preferences',{protectedIds:['10','10','not-an-id'],watchlistIds:['11']});
+  assert.equal(saved.status,200);assert.deepEqual(await saved.json(),{protectedIds:['10'],watchlistIds:['11']});
+  const workspace=await (await request('/api/workspace?visit=true')).json();
+  assert.deepEqual(workspace.preferences.protectedIds,['10']);assert.equal(workspace.roster[0].actualPoints,0);assert.equal(workspace.adviceReady,true);
+  const history=await (await request('/api/history')).json();assert.equal(history.entries.length,1);
+  const record=()=>worker.fetch(new Request('https://fixture.example/api/recommendation-history',{method:'POST',headers,body:JSON.stringify({method:'roster-fit-v2',mode:'ros',actions:[{type:'waiver',title:'Fixture recommendation',detail:'Not executed'}]})}),env);
+  assert.equal((await (await record()).json()).recorded,true);assert.equal((await (await record()).json()).recorded,false);
+  assert.equal((await (await request('/api/history')).json()).entries.length,2);
+  assert.equal((await request('/api/workspace?week=99')).status,400);
+  assert.equal((await request('/api/workspace?leagueId=other')).status,409);
+  assert.equal((await request('/api/preferences',null)).status,400);
+  await cachePut(env,'espn:v2:league:1:2026:1',{...bundle,league:{...league,liveWeek:2}},180);
+  assert.equal((await (await request('/api/workspace?week=1')).json()).adviceReady,false);
+});

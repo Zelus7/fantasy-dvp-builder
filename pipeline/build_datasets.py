@@ -118,6 +118,7 @@ def player_maps(players:pd.DataFrame)->tuple[dict[str,dict[str,Any]],dict[str,st
 def scored_rows(frame:pd.DataFrame,players:pd.DataFrame,items:Sequence[Mapping[str,Any]],through:int)->tuple[list[dict[str,Any]],set[int]]:
     by_gsis,_=player_maps(players); output=[]; unsupported:set[int]=set()
     for raw in frame.to_dict('records'):
+        if str(raw.get('season_type') or raw.get('game_type') or 'REG').upper() not in {'REG','REGULAR'}: continue
         week=int(num(raw.get('week'))); gsis=clean_id(raw.get('player_id') or raw.get('gsis_id'))
         if not gsis or week<1 or week>through: continue
         pos=position(raw.get('position') or by_gsis.get(gsis,{}).get('position')); opponent=team(raw.get('opponent_team') or raw.get('opponent'))
@@ -130,6 +131,10 @@ def dvp_rows(current:pd.DataFrame,prior:pd.DataFrame,players:pd.DataFrame,items:
     now,unknown_now=scored_rows(current,players,items,through); prior_week=int(prior['week'].max()) if not prior.empty and 'week' in prior else 18; old,unknown_old=scored_rows(prior,players,items,max(1,prior_week))
     def games(rows):
         out=defaultdict(float)
+        # A position with no stat line allowed zero points in an observed game;
+        # excluding that game would bias points allowed upward.
+        for defense,week in {(r['_opponent'],r['_week']) for r in rows}:
+            for pos in POSITIONS: out[(pos,defense,week)]=0.0
         for row in rows: out[(row['_position'],row['_opponent'],row['_week'])]+=num(row['_points'])
         return out
     current_games,prior_games=games(now),games(old); defenses=sorted({team(x) for x in all_teams}-{None}); raw=[]; season_samples={}
@@ -153,7 +158,8 @@ def dvp_rows(current:pd.DataFrame,prior:pd.DataFrame,players:pd.DataFrame,items:
         for pos in POSITIONS:
             rows=sorted([r for r in raw if r['window']==window and r['position']==pos],key=lambda r:(-r['pointsAllowedPerGame'],r['defenseTeam'])); average=mean([r['pointsAllowedPerGame'] for r in rows]); total=len(rows)
             for index,row in enumerate(rows):
-                rank=index+1; percentile=100 if total<=1 else 100*(total-rank)/(total-1); baseline=season_ppg.get((pos,row['defenseTeam']),row['pointsAllowedPerGame']); recent=recent_ppg.get((pos,row['defenseTeam']),baseline); delta=(recent-baseline)/baseline if baseline else 0
+                tied=[i for i,r in enumerate(rows) if r['pointsAllowedPerGame']==row['pointsAllowedPerGame']]
+                rank=min(tied)+1; percentile=50 if total<=1 else 100*(total-1-mean(tied))/(total-1); baseline=season_ppg.get((pos,row['defenseTeam']),row['pointsAllowedPerGame']); recent=recent_ppg.get((pos,row['defenseTeam']),baseline); delta=(recent-baseline)/baseline if baseline else 0
                 output.append({**row,'rank':rank,'percentile':round(percentile,2),'leagueAverageDelta':round((row['pointsAllowedPerGame']-average)/average*100 if average else 0,2),'trend':'worsening' if delta>=.07 else 'improving' if delta<=-.07 else 'stable','grade':grade(percentile)})
     return output,sorted(unknown_now|unknown_old)
 
@@ -178,19 +184,23 @@ def schedule_rows(frame:pd.DataFrame,season:int)->list[dict[str,Any]]:
     for row in frame.to_dict('records'):
         if int(num(row.get('season'),season))!=season: continue
         week=int(num(row.get('week'))); home=team(row.get('home_team')); away=team(row.get('away_team'))
-        if week<1 or week>22 or not home or not away or home==away: continue
+        if week<1 or week>18 or str(row.get('game_type') or 'REG').upper()!='REG' or not home or not away or home==away: continue
         event=clean_id(row.get('game_id') or row.get('event_id')) or f'{season}-{week}-{away}-{home}'
         if event in seen: continue
         seen.add(event); kickoff=None
         try:
-            if row.get('gameday') and str(row.get('gameday')).lower()!='nan':
-                local=datetime.fromisoformat(f"{row.get('gameday')}T{row.get('gametime') or '00:00'}").replace(tzinfo=ZoneInfo('America/New_York')); kickoff=local.astimezone(timezone.utc).isoformat().replace('+00:00','Z')
+            if row.get('gameday') and row.get('gametime') and str(row.get('gameday')).lower()!='nan':
+                local=datetime.fromisoformat(f"{row.get('gameday')}T{row.get('gametime')}").replace(tzinfo=ZoneInfo('America/New_York')); kickoff=local.astimezone(timezone.utc).isoformat().replace('+00:00','Z')
         except Exception: pass
         roof=str(row.get('roof') or '').lower()
-        output.append({'eventId':event,'season':season,'week':week,'kickoff':kickoff,'homeTeam':home,'awayTeam':away,'venue':None if str(row.get('stadium')).lower()=='nan' else row.get('stadium'),'indoor':roof in {'dome','closed','indoor'},'status':None})
+        complete=math.isfinite(num(row.get('home_score'),math.nan)) and math.isfinite(num(row.get('away_score'),math.nan))
+        output.append({'eventId':event,'season':season,'week':week,'kickoff':kickoff,'homeTeam':home,'awayTeam':away,'venue':None if str(row.get('stadium')).lower()=='nan' else row.get('stadium'),'indoor':roof in {'dome','closed','indoor'},'status':'STATUS_FINAL' if complete else 'STATUS_SCHEDULED'})
     return sorted(output,key=lambda r:(r['week'],r['kickoff'] or '',r['eventId']))
 
 def now()->str:return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
+def data_coverage(frame:pd.DataFrame,through:int)->dict[str,Any]:
+    records=[r for r in frame.to_dict('records') if str(r.get('season_type') or r.get('game_type') or 'REG').upper() in {'REG','REGULAR'} and 1<=int(num(r.get('week')))<=through]
+    return {'actualThroughWeek':max((int(num(r.get('week'))) for r in records),default=0),'sourceRows':len(records),'observedTeamGames':len({(team(r.get('recent_team') or r.get('team')),int(num(r.get('week')))) for r in records})}
 def scoring_hash(items)->str:return hashlib.sha256(json.dumps(items,sort_keys=True,separators=(',',':')).encode()).hexdigest()[:16]
 def upload(base,token,path,payload):
     response=requests.post(f"{base.rstrip('/')}{path}",headers={'Authorization':f'Bearer {token}'},json=payload,timeout=120)
@@ -216,7 +226,7 @@ def main()->int:
         if not args.no_upload: upload(base,token,'/api/internal/pipeline/schedule',payload)
     for league in leagues:
         season=int(args.season or league['seasonYear']);through=max(1,min(22,int(args.through_week or league.get('currentWeek') or 1)));current=stats[stats['season']==season] if 'season' in stats else pd.DataFrame();prior=stats[stats['season']==season-1] if 'season' in stats else pd.DataFrame();all_teams={r['homeTeam'] for r in schedule_payloads[season]['rows']}|{r['awayTeam'] for r in schedule_payloads[season]['rows']};items=league.get('scoringItems') or []
-        dvp,unknown1=dvp_rows(current,prior,players,items,season,through,all_teams);features,unknown2=feature_rows(current,prior,players,items,season,through);unknown=sorted(set(unknown1)|set(unknown2));metadata={'leagueId':str(league['leagueId']),'season':season,'throughWeek':through,'generatedAt':now(),'source':'nflverse weekly player stats via nflreadpy','scoringType':league.get('scoringType'),'scoringHash':scoring_hash(items),'unsupportedScoring':[{'statId':x,'reason':'weekly feed cannot reproduce this rule exactly'} for x in unknown],'earlySeasonBlend':'prior season tapers out after six current games'};dvp_payload={'metadata':metadata,'rows':dvp};feature_payload={'metadata':metadata,'rows':features};write(output,f"dvp-{league['leagueId']}-{season}.json",dvp_payload);write(output,f"player-features-{league['leagueId']}-{season}.json",feature_payload)
+        coverage=data_coverage(current,through);actual=coverage['actualThroughWeek'];dvp,unknown1=dvp_rows(current,prior,players,items,season,actual,all_teams);features,unknown2=feature_rows(current,prior,players,items,season,actual);unknown=sorted(set(unknown1)|set(unknown2));metadata={'leagueId':str(league['leagueId']),'season':season,'throughWeek':actual,'requestedThroughWeek':through,**coverage,'generatedAt':now(),'source':'nflverse weekly player stats via nflreadpy','scoringType':league.get('scoringType'),'scoringHash':scoring_hash(items),'unsupportedScoring':[{'statId':x,'reason':'weekly feed cannot reproduce this rule exactly'} for x in unknown],'earlySeasonBlend':'prior season tapers out after six current games'};dvp_payload={'metadata':metadata,'rows':dvp};feature_payload={'metadata':metadata,'rows':features};write(output,f"dvp-{league['leagueId']}-{season}.json",dvp_payload);write(output,f"player-features-{league['leagueId']}-{season}.json",feature_payload)
         if not args.no_upload: upload(base,token,'/api/internal/pipeline/dvp',dvp_payload);upload(base,token,'/api/internal/pipeline/player-features',feature_payload)
         print(json.dumps({'leagueId':league['leagueId'],'season':season,'throughWeek':through,'dvpRows':len(dvp),'featureRows':len(features),'unsupportedScoring':unknown}))
     return 0

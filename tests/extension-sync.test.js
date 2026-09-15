@@ -49,7 +49,7 @@ test('paired sync survives Fan 404 and missing owners, then encrypts credentials
   assert.equal(requests.length,3);
   assert.equal((await getCredentials(env)).s2,'test-session');
   assert.equal((await listLeagues(env))[0].teamId,'9');
-  const cache=await cacheGet(env,`espn:league:1269378:${season}`);
+  const cache=await cacheGet(env,`espn:v2:league:1269378:${season}:current`);
   assert.equal(cache.stale,false);
   assert.equal(cache.value.teams[0].roster[0].name,'Test Quarterback');
   const encrypted=db.prepare('SELECT encrypted_credentials FROM espn_credentials').get().encrypted_credentials;
