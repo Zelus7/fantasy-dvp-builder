@@ -33,7 +33,7 @@ require evidence. Do not equate passing UI smoke tests with accurate advice.
   replacements, bye/playoff depth planning and recommendation history.
 - [x] Full regression suite, source-reconciliation checks, live browser
   smoke tests and narrow-screen visual review; no real ESPN transactions.
-- [ ] Final review/polish, clean commit/push, deployment and post-deploy checks.
+- [x] Final review/polish, clean commit/push, deployment and post-deploy checks.
 
 ## Guardrails
 
@@ -145,3 +145,10 @@ Ask only for actual missing authority, credentials, or material product choices.
   failures and validated dispatch inputs. It is NOT registered on main and its
   ingestion secrets are NOT configured. Await Alex's scheduler-only approval;
   do not merge PR #6 or change the default branch to bypass this gate.
+
+Shipped code commit: `97270cb`, pushed to `codex/deploy-private-v1` / PR #6.
+Live Worker version: `de9c3ef4-b539-41f7-a6aa-880feaeb3ddb`.
+GitHub application and pipeline CI both passed. The live `app.js` SHA-256
+matches the committed file. Post-deploy UI confirmed exact 9.82 / 5.44 / 0.00
+actual-score rendering, continued authentication, roster-linked headlines and
+future bye coverage gaps. Only scheduled pipeline activation remains gated.
