@@ -1,7 +1,8 @@
 import unittest
+from unittest.mock import patch
 import pandas as pd
 
-from pipeline.build_datasets import dvp_rows, feature_rows, grade, prior_weight, schedule_rows, score_row
+from pipeline.build_datasets import dvp_rows, feature_rows, grade, load_player_stats_with_preseason_fallback, prior_weight, schedule_rows, score_row, data_coverage
 
 SCORING=[{'statId':3,'points':.04},{'statId':4,'points':4},{'statId':20,'points':-2},{'statId':24,'points':.1},{'statId':25,'points':6},{'statId':42,'points':.1},{'statId':43,'points':6},{'statId':53,'points':.5},{'statId':72,'points':-2}]
 PLAYERS=pd.DataFrame([
@@ -10,6 +11,25 @@ PLAYERS=pd.DataFrame([
 ])
 
 class PipelineTests(unittest.TestCase):
+ def test_postseason_is_excluded_and_missing_position_games_are_zero(self):
+  rows=pd.DataFrame([{'season':2025,'season_type':'REG','week':1,'player_id':'p1','position':'WR','recent_team':'MIA','opponent_team':'BUF','receiving_yards':100},{'season':2025,'season_type':'POST','week':19,'player_id':'p1','position':'WR','recent_team':'MIA','opponent_team':'BUF','receiving_yards':1000}])
+  dvp,_=dvp_rows(rows,pd.DataFrame(),PLAYERS,SCORING,2025,22,['BUF'])
+  wr=next(r for r in dvp if r['position']=='WR' and r['window']=='season')
+  te=next(r for r in dvp if r['position']=='TE' and r['window']=='season')
+  self.assertEqual(wr['games'],1);self.assertEqual(wr['pointsAllowedPerGame'],10)
+  self.assertEqual(te['games'],1);self.assertEqual(te['pointsAllowedPerGame'],0)
+  self.assertEqual(data_coverage(rows,22)['actualThroughWeek'],1)
+
+ def test_missing_kickoff_is_not_invented_at_midnight(self):
+  rows=schedule_rows(pd.DataFrame([{'season':2026,'week':1,'game_id':'x','gameday':'2026-09-10','home_team':'BUF','away_team':'MIA'}]),2026)
+  self.assertIsNone(rows[0]['kickoff'])
+
+ def test_tied_defenses_have_equal_rank_and_percentile(self):
+  current=pd.DataFrame([{'week':1,'player_id':'p1','position':'WR','opponent_team':defense,'receiving_yards':100} for defense in ['BUF','MIA']])
+  rows,_=dvp_rows(current,pd.DataFrame(),PLAYERS,SCORING,2026,1,['BUF','MIA'])
+  wr=[r for r in rows if r['position']=='WR' and r['window']=='season']
+  self.assertEqual(wr[0]['rank'],wr[1]['rank']);self.assertEqual(wr[0]['percentile'],wr[1]['percentile'])
+
  def test_common_half_ppr_scoring(self):
   points,unsupported=score_row({'receptions':6,'receiving_yards':80,'receiving_tds':1,'fumbles_lost':1},SCORING)
   self.assertAlmostEqual(points,15.0)
@@ -55,5 +75,22 @@ class PipelineTests(unittest.TestCase):
   self.assertEqual(rows[0]['homeTeam'],'WSH')
   self.assertEqual(rows[0]['awayTeam'],'JAX')
   self.assertTrue(rows[0]['kickoff'].endswith('Z'))
+
+ def test_missing_current_player_stats_uses_prior_season(self):
+  prior=pd.DataFrame([{'season':2025,'week':1}])
+  def load(_name,seasons):
+   if seasons==[2026]: raise ConnectionError('404 Client Error: stats_player_week_2026.parquet')
+   return prior
+  with patch('pipeline.build_datasets.load_nflreadpy',side_effect=load):
+   result=load_player_stats_with_preseason_fallback([2026])
+  self.assertEqual(result['season'].tolist(),[2025])
+
+ def test_current_player_stats_network_failure_does_not_fall_back(self):
+  def load(_name,seasons):
+   if seasons==[2026]: raise ConnectionError('connection timed out')
+   return pd.DataFrame([{'season':2025,'week':1}])
+  with patch('pipeline.build_datasets.load_nflreadpy',side_effect=load):
+   with self.assertRaisesRegex(ConnectionError,'timed out'):
+    load_player_stats_with_preseason_fallback([2026])
 
 if __name__=='__main__': unittest.main()

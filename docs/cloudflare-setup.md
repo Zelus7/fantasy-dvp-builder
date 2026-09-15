@@ -8,7 +8,7 @@ npx wrangler login
 npx wrangler d1 create fantasy-command-center
 ```
 
-Copy the returned database ID into `wrangler.jsonc` for local work. GitHub deployment injects `CLOUDFLARE_D1_DATABASE_ID` at runtime, so the production ID is not committed.
+Copy the returned database ID into `wrangler.jsonc`. A D1 database ID identifies the binding target but does not authorize access; API tokens and runtime secrets remain outside the repository.
 
 Apply the schema:
 

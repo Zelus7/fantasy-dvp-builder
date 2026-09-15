@@ -4,7 +4,7 @@
   "version":"0.1.0",
   "description":"Securely sync ESPN fantasy session cookies to your private Fantasy Command Center app.",
   "permissions":["cookies","storage","alarms"],
-  "host_permissions":["https://*.espn.com/*","https://espn.com/*","https://*.workers.dev/*"],
+  "host_permissions":["https://*.espn.com/*","https://espn.com/*","https://fantasy-command-center.acarvall87.workers.dev/*"],
   "background":{"service_worker":"background.js","type":"module"},
   "action":{"default_popup":"popup.html","default_title":"Fantasy Command Center ESPN Connector"}
 }
