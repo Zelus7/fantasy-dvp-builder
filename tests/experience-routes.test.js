@@ -6,6 +6,7 @@ import worker from '../src/index.js';
 import {saveCredentials,saveLeagues,cachePut,replaceScheduleDataset} from '../src/db.js';
 import {createSessionToken} from '../src/security.js';
 import {freezeDecision} from '../src/decision-store.js';
+import {fetchHistoricalPlayerScores} from '../src/espn.js';
 
 test('preferences, visit history and advice gates use the real schema behind authenticated routes',async t=>{
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());for(const file of ['0001_initial.sql','0002_decision_tracking.sql'])db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
@@ -40,5 +41,7 @@ test('preferences, visit history and advice gates use the real schema behind aut
   assert.equal((await feedback({id:snapshot.id,status:'acquired',cost:3})).status,400);
   assert.equal((await (await request('/api/decision-history')).json()).entries[0].feedback.cost,3);
   await cachePut(env,'espn:v2:league:1:2026:1',{...bundle,league:{...league,liveWeek:2}},180);
+  await cachePut(env,'espn:v2:freeagents:1:2026:1:all:150',[{playerId:'-16016',actualPoints:5}],300);
+  assert.deepEqual(await fetchHistoricalPlayerScores(env,league,1,['10','-16016']),{'10':0,'-16016':5});
   assert.equal((await (await request('/api/workspace?week=1')).json()).adviceReady,false);
 });
