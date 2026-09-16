@@ -66,11 +66,16 @@ export async function fetchNflWeekSchedule(env,season,week,{force=false}={}){con
 export function buildOpponentLookup(games){const lookup={};for(const game of games||[]){lookup[game.homeTeam]={opponent:game.awayTeam,game};lookup[game.awayTeam]={opponent:game.homeTeam,game}}return lookup}
 export function selectedTeam(bundle){return bundle.teams.find(team=>String(team.id)===String(bundle.league.teamId))||null}
 export async function fetchHistoricalPlayerScores(env,league,week,ids){
-  const credentials=await credentialsOrThrow(env),scores={},unique=[...new Set(ids.map(String))].filter(id=>/^\d{1,12}$/.test(id)).slice(0,200);
-  for(let offset=0;offset<unique.length;offset+=90){
-    const batch=unique.slice(offset,offset+90),filter={players:{filterIds:{value:batch.map(Number)},limit:90}};
-    const body=await fetchJson(leagueUrl(league.leagueId,league.seasonYear,`?view=kona_player_info&scoringPeriodId=${Number(week)}`),{headers:headers(credentials,filter)},'ESPN historical scores');
-    for(const item of body.players||[]){const p=item.player;if(!p||!batch.includes(String(p.id)))continue;const stat=weeklyPlayerStats(p,league.seasonYear,week);if(stat.actualPoints!=null&&Number.isFinite(stat.actualPoints))scores[String(p.id)]=stat.actualPoints;}
+  const wanted=new Set(ids.map(String).filter(id=>/^-?\d{1,12}$/.test(id)).slice(0,200)),scores={};
+  // Reuse the proven exact-week league and waiver views. ESPN's filterIds
+  // historical player-pool request is not supported consistently.
+  const bundle=await fetchLeagueBundle(env,league,{week});
+  if(bundle.cache?.stale)throw new HttpError(502,'HISTORICAL_SCORES_STALE','Historical ESPN scores could not be refreshed.');
+  const collect=players=>{for(const p of players)if(wanted.has(String(p.playerId))&&p.actualPoints!=null&&Number.isFinite(p.actualPoints))scores[String(p.playerId)]=p.actualPoints;};
+  collect(allLeaguePlayers(bundle));
+  if([...wanted].some(id=>!Object.hasOwn(scores,id))){
+    const free=await fetchFreeAgents(env,league,null,150,{week});
+    if(!free.cache?.stale)collect(free.players);
   }
   return scores;
 }

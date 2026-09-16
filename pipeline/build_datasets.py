@@ -281,7 +281,13 @@ def main()->int:
     else:
         publish_datasets(base,token,pending)
         verification=requests.get(f"{base.rstrip('/')}/api/internal/pipeline/verify",headers={'Authorization':f'Bearer {token}'},timeout=120)
-        verification.raise_for_status()
+        if not verification.ok:
+            try:
+                problem=verification.json().get('error',{})
+                detail=f"{problem.get('code','unknown')}: {problem.get('message','no detail')}"
+            except ValueError:
+                detail='non-JSON response'
+            raise RuntimeError(f'Live verification failed ({verification.status_code}): {detail}')
         result=verification.json()
         if not result.get('adviceReady') or not result.get('snapshotSaved'):
             raise RuntimeError('Published data, but live decision readiness or snapshot verification failed')

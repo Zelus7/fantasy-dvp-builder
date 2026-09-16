@@ -25,6 +25,8 @@ Historical bid data is used only if ESPN explicitly supplies executed bids with 
 
 No ESPN roster moves, bids or trade offers are submitted by the app or this release.
 
+Model maintenance: `npm run build:model` fingerprints the calculation sources and writes an append-only archive under `public/model-history/`. Commit that archive and `src/model-revision.js` together. Do not delete older model directories: historical replay loads the original version in a background worker so later improvements do not rewrite past predictions.
+
 ## Verification
 
 - JavaScript tests: 90 passing at the deployment gate.

@@ -12,7 +12,7 @@ import {freezeDecision,decisionHistory} from './decision-store.js';
 
 const nowIso=()=>new Date().toISOString();
 const stamp=value=>value?Date.parse(String(value).includes('T')?value:String(value).replace(' ','T')+'Z'):NaN;
-const uniqueIds=values=>[...new Set((Array.isArray(values)?values:[]).map(String).filter(v=>/^\d{1,12}$/.test(v)))].slice(0,100);
+const uniqueIds=values=>[...new Set((Array.isArray(values)?values:[]).map(String).filter(v=>/^-?\d{1,12}$/.test(v)))].slice(0,100);
 const preferenceKey=league=>`preferences:${league.leagueId}:${league.seasonYear}`;
 
 export function sourceFreshness(updatedAt,maxAgeSeconds,details={}) {
