@@ -1,6 +1,7 @@
 import {optimizeLineup,eligibleForSlot} from './analysis.js';
+import {MODEL_REVISION} from './model-revision.js';
 
-export const WAIVER_METHOD='waiver-plan-v3';
+export const WAIVER_METHOD=`waiver-plan-v3:${MODEL_REVISION.slice(0,12)}`;
 const id=p=>String(p.playerId), round=n=>Math.round(n*10)/10;
 const finite=v=>v!=null&&Number.isFinite(Number(v));
 const injured=p=>['OUT','IR','INJURY_RESERVE','DOUBTFUL','SUSPENDED','SUSPENSION'].includes(String(p.injuryStatus).toUpperCase());

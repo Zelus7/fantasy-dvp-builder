@@ -10,7 +10,7 @@
 - Current-season team target share, carry share, recent targets, target trend, offensive snaps, scoring-area opportunities and depth rank are available where the public feeds support them. Small samples and touchdown-dependent production are called out.
 - Bid guidance requires a current, verified FAAB balance and minimum bid. Spending caps are conservative policy rules, not calibrated win odds. At least five identifiable executed position-matched waiver bids are needed to display a historical market median.
 - Fallbacks include a named existing bench option and alternative claims. Decision deadlines account for the add, drop and fallback players' kickoff times. An unknown ESPN processing deadline remains unknown.
-- Server-owned immutable decision inputs include the candidate pool, source freshness, model version, league constraints and return assumptions. Frozen lineups can later be scored against exact-week ESPN results and an ESPN-only weekly baseline; no hindsight optimization or fabricated zeroes.
+- Server-owned immutable decision inputs include the candidate pool, source freshness, exact model-code fingerprint, league constraints and return assumptions. Frozen lineups can later be scored against exact-week ESPN results and an ESPN-only weekly baseline; no hindsight optimization or fabricated zeroes.
 - Refresh forces the roster, waiver pool and current news checks. Historical-week selection now explains why advice is withheld. Player-specific ESPN headlines supplement the general feed.
 
 ## Deliberate limits
@@ -27,7 +27,7 @@ No ESPN roster moves, bids or trade offers are submitted by the app or this rele
 
 ## Verification
 
-- JavaScript tests: 89 passing at the deployment gate.
+- JavaScript tests: 90 passing at the deployment gate.
 - Python tests: 26 passing at the deployment gate.
 - Worker dry run, syntax checks and secret scan passed.
 - Enhanced public dataset build: 272 schedule games, 384 DvP rows, 667 player features; 360 current-season workload records, 359 matched snap records, 360 scoring-area records. Statistical coverage is Week 1, not the requested future Week 2.
