@@ -17,6 +17,10 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
+try:
+    from .opportunity import enrich_opportunity
+except ImportError:
+    from opportunity import enrich_opportunity
 
 TEAMS={"ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND","JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA","SF","TB","TEN","WSH"}
 ALIASES={"ARZ":"ARI","BLT":"BAL","CLV":"CLE","HST":"HOU","JAC":"JAX","LA":"LAR","OAK":"LV","SD":"LAC","STL":"LAR","WAS":"WSH"}
@@ -176,7 +180,7 @@ def feature_rows(current:pd.DataFrame,prior:pd.DataFrame,players:pd.DataFrame,it
         if not current_scores and old_scores: weight=1
         current_ppg=mean(current_scores); old_ppg=mean(old_scores); scores=current_scores or old_scores
         targets=[num(r.get('targets')) for r in sample]; carries=[num(r.get('carries')) for r in sample]; receptions=[num(r.get('receptions')) for r in sample]; identity=identities.get(gsis,{})
-        output.append({'espnId':espn[gsis],'gsisId':gsis,'playerName':str(identity.get('display_name') or identity.get('full_name') or sample[-1].get('player_display_name') or gsis),'position':pos,'team':team(identity.get('latest_team') or sample[-1].get('_team')),'season':season,'games':len(scores),'currentGames':len(current_scores),'priorGames':len(old_scores),'priorSeason':season-1 if old_scores else None,'priorWeight':round(weight,3),'seasonPpg':round(current_ppg*(1-weight)+old_ppg*weight,3),'last3Ppg':round(mean(scores[-3:]),3),'last5Ppg':round(mean(scores[-5:]),3),'standardDeviation':round(std(scores),3),'targetsPerGame':round(mean(targets),3),'carriesPerGame':round(mean(carries),3),'touchesPerGame':round(mean([carries[i]+receptions[i] for i in range(len(sample))]),3),'targetShare':None})
+        output.append({'espnId':espn[gsis],'gsisId':gsis,'playerName':str(identity.get('display_name') or identity.get('full_name') or sample[-1].get('player_display_name') or gsis),'position':pos,'team':team(identity.get('latest_team') or sample[-1].get('_team')),'season':season,'games':len(scores),'currentGames':len(current_scores),'priorGames':len(old_scores),'priorSeason':season-1 if old_scores else None,'priorWeight':round(weight,3),'seasonPpg':round(current_ppg*(1-weight)+old_ppg*weight,3),'last3Ppg':round(mean(scores[-3:]),3),'last5Ppg':round(mean(scores[-5:]),3),'standardDeviation':round(std(scores),3),'targetsPerGame':round(mean(targets),3),'carriesPerGame':round(mean(carries),3),'touchesPerGame':round(mean([carries[i]+receptions[i] for i in range(len(sample))]),3),'targetShare':None,'_weeklyPoints':[{'week':r['_week'],'points':round(r['_points'],3)} for r in current_rows]})
     return output,sorted(u1|u2)
 
 def schedule_rows(frame:pd.DataFrame,season:int)->list[dict[str,Any]]:
@@ -254,6 +258,14 @@ def main()->int:
     leagues=config.get('leagues') or []
     if not leagues: raise RuntimeError('No connected football leagues')
     seasons=sorted({int(args.season or league['seasonYear']) for league in leagues});stats=load_player_stats_with_preseason_fallback(seasons);players=to_pandas(load_nflreadpy('load_players'));schedules=to_pandas(load_nflreadpy('load_schedules',seasons));output=Path(args.output_dir)
+    optional={}
+    for label,loader in [('snaps','load_snap_counts'),('pbp','load_pbp'),('depth','load_depth_charts')]:
+        try:
+            optional[label]=to_pandas(load_nflreadpy(loader,seasons))
+            print(json.dumps({'optionalFeed':label,'rows':len(optional[label])}))
+        except Exception as error:
+            optional[label]=pd.DataFrame()
+            print(json.dumps({'optionalFeed':label,'status':'unavailable','errorType':type(error).__name__}))
     schedule_payloads={}; pending=[]
     for season in seasons:
         rows=schedule_rows(schedules,season)
@@ -262,11 +274,18 @@ def main()->int:
         pending.append(('/api/internal/pipeline/schedule',payload))
     for league in leagues:
         season=int(args.season or league['seasonYear']);through=max(1,min(22,int(args.through_week or league.get('currentWeek') or 1)));current=stats[stats['season']==season] if 'season' in stats else pd.DataFrame();prior=stats[stats['season']==season-1] if 'season' in stats else pd.DataFrame();all_teams={r['homeTeam'] for r in schedule_payloads[season]['rows']}|{r['awayTeam'] for r in schedule_payloads[season]['rows']};items=league.get('scoringItems') or []
-        coverage=data_coverage(current,through);actual=coverage['actualThroughWeek'];dvp,unknown1=dvp_rows(current,prior,players,items,season,actual,all_teams);features,unknown2=feature_rows(current,prior,players,items,season,actual);unknown=sorted(set(unknown1)|set(unknown2));metadata={'leagueId':str(league['leagueId']),'season':season,'throughWeek':actual,'requestedThroughWeek':through,**coverage,'generatedAt':now(),'source':'nflverse weekly player stats via nflreadpy','scoringType':league.get('scoringType'),'scoringHash':scoring_hash(items),'unsupportedScoring':[{'statId':x,'reason':'weekly feed cannot reproduce this rule exactly'} for x in unknown],'earlySeasonBlend':'prior season tapers out after six current games'};dvp_payload={'metadata':metadata,'rows':dvp};feature_payload={'metadata':metadata,'rows':features};write(output,f"dvp-{league['leagueId']}-{season}.json",dvp_payload);write(output,f"player-features-{league['leagueId']}-{season}.json",feature_payload)
+        coverage=data_coverage(current,through);actual=coverage['actualThroughWeek'];dvp,unknown1=dvp_rows(current,prior,players,items,season,actual,all_teams);features,unknown2=feature_rows(current,prior,players,items,season,actual);features=enrich_opportunity(features,current,players,optional['snaps'],optional['pbp'],optional['depth'],actual);unknown=sorted(set(unknown1)|set(unknown2));metadata={'leagueId':str(league['leagueId']),'season':season,'throughWeek':actual,'requestedThroughWeek':through,**coverage,'generatedAt':now(),'source':'nflverse weekly player stats via nflreadpy','scoringType':league.get('scoringType'),'scoringHash':scoring_hash(items),'unsupportedScoring':[{'statId':x,'reason':'weekly feed cannot reproduce this rule exactly'} for x in unknown],'earlySeasonBlend':'prior season tapers out after six current games'};dvp_payload={'metadata':metadata,'rows':dvp};feature_payload={'metadata':metadata,'rows':features};write(output,f"dvp-{league['leagueId']}-{season}.json",dvp_payload);write(output,f"player-features-{league['leagueId']}-{season}.json",feature_payload)
         pending.extend([('/api/internal/pipeline/dvp',dvp_payload),('/api/internal/pipeline/player-features',feature_payload)])
         print(json.dumps({'leagueId':league['leagueId'],'season':season,'throughWeek':through,'dvpRows':len(dvp),'featureRows':len(features),'unsupportedScoring':unknown}))
     if args.no_upload: validate_publication(pending)
-    else: publish_datasets(base,token,pending)
+    else:
+        publish_datasets(base,token,pending)
+        verification=requests.get(f"{base.rstrip('/')}/api/internal/pipeline/verify",headers={'Authorization':f'Bearer {token}'},timeout=120)
+        verification.raise_for_status()
+        result=verification.json()
+        if not result.get('adviceReady') or not result.get('snapshotSaved'):
+            raise RuntimeError('Published data, but live decision readiness or snapshot verification failed')
+        print(json.dumps({'liveVerification':result}))
     return 0
 if __name__=='__main__':
     try: raise SystemExit(main())

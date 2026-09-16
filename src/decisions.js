@@ -1,16 +1,17 @@
 import {optimizeLineup} from './analysis.js';
 import {STARTER_SLOT_IDS} from './constants.js';
+import {healthyBaseline,returnScenario} from './waiver-plan.js';
 
 const round=value=>Math.round(value*10)/10;
 const id=player=>String(player.playerId);
 const finite=value=>value!=null&&Number.isFinite(Number(value));
 const unavailable=player=>['OUT','IR','INJURY_RESERVE','SUSPENDED','SUSPENSION','DOUBTFUL'].includes(String(player.injuryStatus).toUpperCase());
 export const DECISION_METHOD='roster-fit-v2';
-export function byeCoverage(roster,slots,schedules){
+export function byeCoverage(roster,slots,schedules,{currentWeek=0,now=Date.now()}={}){
   const weeks=[...new Set(Object.values(schedules).flatMap(s=>(s.weeks||[]).map(w=>w.week)))].sort((a,b)=>a-b);
   return weeks.map(week=>{
     const byes=[],missing=[];
-    const players=roster.map(p=>{const game=schedules[id(p)]?.weeks.find(w=>w.week===week),value=horizonValue(p,'ros');if(game?.bye)byes.push(p.name);if(!game||game.missingSchedule)missing.push(p.name);return{...p,game:null,isStarter:false,decisionScore:value??0,hasEstimate:value!=null,isAvailable:value!=null&&!!game&&!game.bye&&!game.missingSchedule}});
+    const players=roster.map(p=>{const game=schedules[id(p)]?.weeks.find(w=>w.week===week),value=healthyBaseline(p),availability=returnScenario(p,week,currentWeek,'planning',now);if(game?.bye)byes.push(p.name);if(!game||game.missingSchedule||availability.uncertain&&availability.sourceCurrent===false)missing.push(p.name);return{...p,game:null,isStarter:false,decisionScore:value??0,hasEstimate:value!=null,isAvailable:value!=null&&availability.available&&!!game&&!game.bye&&!game.missingSchedule}});
     const lineup=optimizeLineup(players,slots,[],0);
     return{week,byePlayers:byes,missingPlayers:missing,unfilledSlots:lineup.unfilledSlots.map(s=>s.slotId),status:missing.length?'unknown':lineup.unfilledSlots.length?'coverage-gap':'covered'};
   });

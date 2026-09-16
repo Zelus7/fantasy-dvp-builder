@@ -5,9 +5,10 @@ import {DatabaseSync} from 'node:sqlite';
 import worker from '../src/index.js';
 import {saveCredentials,saveLeagues,cachePut,replaceScheduleDataset} from '../src/db.js';
 import {createSessionToken} from '../src/security.js';
+import {freezeDecision} from '../src/decision-store.js';
 
 test('preferences, visit history and advice gates use the real schema behind authenticated routes',async t=>{
-  const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());for(const file of ['0001_initial.sql','0002_decision_tracking.sql'])db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const env={SESSION_SECRET:'fixture-signing-secret-32-characters',CREDENTIAL_ENCRYPTION_KEY:Buffer.alloc(32,2).toString('base64'),DB:{prepare(sql){const make=(args=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...args)||null},async all(){return{results:db.prepare(sql).all(...args)}},async run(){const r=db.prepare(sql).run(...args);return{meta:{changes:Number(r.changes)}}}});return make()},async batch(statements){const out=[];for(const s of statements)out.push(await s.run());return out}}};
   await saveCredentials(env,{swid:'fixture-owner',s2:'fixture-cookie'});
   const league={leagueId:'1',seasonYear:2026,teamId:'9',leagueName:'Fixture',teamName:'My fixture team',currentWeek:1,liveWeek:1,lineupSlotCounts:{4:1,20:2},rosterSize:3};
@@ -32,6 +33,12 @@ test('preferences, visit history and advice gates use the real schema behind aut
   assert.equal((await request('/api/workspace?week=99')).status,400);
   assert.equal((await request('/api/workspace?leagueId=other')).status,409);
   assert.equal((await request('/api/preferences',null)).status,400);
+  const snapshot=await freezeDecision(env,league,{waiversReady:true,roster,freeAgents:[{playerId:'11',name:'Candidate'}],settings:{currentWeek:1,mode:'week',now:Date.now()}},{});
+  const feedback=body=>worker.fetch(new Request('https://fixture.example/api/decision-feedback',{method:'POST',headers,body:JSON.stringify(body)}),env);
+  assert.equal((await feedback({id:snapshot.id,status:'acquired',playerId:'11',cost:3})).status,200);
+  assert.equal((await feedback({id:snapshot.id,status:'acquired',playerId:'999',cost:3})).status,400);
+  assert.equal((await feedback({id:snapshot.id,status:'acquired',cost:3})).status,400);
+  assert.equal((await (await request('/api/decision-history')).json()).entries[0].feedback.cost,3);
   await cachePut(env,'espn:v2:league:1:2026:1',{...bundle,league:{...league,liveWeek:2}},180);
   assert.equal((await (await request('/api/workspace?week=1')).json()).adviceReady,false);
 });
