@@ -36,18 +36,26 @@ async function loadWorkspace({force=false,visit=false}={}) {
     const data=await api(`/api/workspace?${params({force,visit})}`);if(epoch!==state.epoch)return;
     state.data=data;state.lastLoad=Date.now();state.opportunities.clear();state.errors.clear();
     $('#week').innerHTML=option('','Current week',state.week==null)+Array.from({length:18},(_,i)=>option(i+1,`Week ${i+1}`,state.week===i+1)).join('');
-    renderAll();if(['dashboard','waivers','trades'].includes(state.current))void loadOpportunities(force);if(data.freshness.news?.status!=='fresh')void refreshPublicNews(epoch);
+    renderAll();if(['dashboard','waivers','trades'].includes(state.current))void loadOpportunities(force);if(data.freshness.news?.status!=='fresh'||data.freshness.playerNews?.status!=='fresh')void refreshPublicNews(epoch);
   }catch(error){if(epoch!==state.epoch||error.code==='AUTH_REQUIRED')return;$('#data-status').innerHTML=warnings([`Refresh failed: ${error.message}. Any retained results are from the previous successful load; do not act until refreshed.`]);state.opportunities.clear();if(state.data){state.data.adviceReady=false;state.data.readinessReasons=[`Latest refresh failed: ${error.message}`];state.data.actions=[];renderCurrent()}else target(state.current,errorCard(error.message));}
   finally{if(epoch===state.epoch){state.loading=false;main.inert=false;main.setAttribute('aria-busy','false');$('#refresh').disabled=false}}
 }
 async function loadAuthenticatedApp(){showApp();await loadLeagues();if(!state.leagues.length){switchView('settings');return}await loadWorkspace({visit:true})}
 async function refreshPublicNews(epoch){
-  try{
-    const response=await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=12',{credentials:'omit',referrerPolicy:'no-referrer',signal:AbortSignal.timeout(8000)});
-    if(!response.ok)return;const items=normalizeNews(await response.json());if(!items.length||epoch!==state.epoch||!state.data)return;
-    state.data.news=items;state.data.freshness.news={status:'fresh',updatedAt:new Date().toISOString(),coverage:'Public ESPN headlines fetched directly without credentials. Not a complete injury feed.'};
-    if(state.current==='dashboard')renderAll();
-  }catch{/* Keep the visible missing/stale feed warning; no fabricated news. */}
+  const roster=state.data?.roster||[],items=[],checked=[];
+  const get=async url=>{const response=await fetch(url,{credentials:'omit',referrerPolicy:'no-referrer',signal:AbortSignal.timeout(8000)});if(!response.ok)throw new Error('Public feed unavailable');return response.json()};
+  let general=false;
+  try{items.push(...normalizeNews(await get('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=12')));general=true}catch{/* Preserve a visible coverage warning. */}
+  const ids=roster.map(p=>String(p.playerId)).filter(id=>/^\d{1,12}$/.test(id)).slice(0,16);
+  for(let i=0;i<ids.length;i+=4){
+    if(epoch!==state.epoch||!state.data)return;
+    await Promise.all(ids.slice(i,i+4).map(async id=>{try{const body=await get(`https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/${id}/overview`);items.push(...normalizeNews({articles:body.news}).map(n=>({...n,playerIds:[id]})));checked.push(id)}catch{/* A failed player request does not invalidate other sources. */}}));
+  }
+  if(epoch!==state.epoch||!state.data)return;
+  state.data.news=[...new Map([...items,...state.data.news||[]].map(n=>[n.url,n])).values()];
+  if(general)state.data.freshness.news={status:'fresh',updatedAt:new Date().toISOString(),coverage:'Public ESPN headlines fetched directly without credentials. Not a complete injury feed.'};
+  state.data.freshness.playerNews={status:checked.length===ids.length?'fresh':'partial',updatedAt:checked.length?new Date().toISOString():null,coverage:`Direct browser check: ${checked.length}/${ids.length} player news feeds. No cookies sent. Not a complete practice/inactive feed.`};
+  renderSourceStatus();if(state.current==='dashboard')renderCurrent();
 }
 function opportunityKey(){return state.current==='trades'?'ros::trades':state.current==='waivers'?`${state.mode}:${state.position}:waivers`:'week::dashboard'}
 function currentOpportunities(){return state.opportunities.get(opportunityKey())}
@@ -76,7 +84,8 @@ async function loadOpportunities(force=false){
   })();state.pending.set(requestKey,work);return work;
 }
 function opportunityPlaceholder(){const error=state.errors.get(opportunityKey());return error?errorCard(error,'retry-opportunities'):empty('Checking legal roster moves and both teams’ trade fit…')}
-function renderAll(){const d=state.data;if(!d)return;$('#data-status').innerHTML=`<div class="data-summary">Week ${esc(d.league.currentWeek)} · Checked ${esc(date(d.generatedAt))} · ${d.adviceReady?'ESPN / schedule ready':'Advice withheld: check data below'}</div>${freshness(d.freshness)}`;renderCurrent()}
+function renderSourceStatus(){const d=state.data;if(!d)return;$('#data-status').innerHTML=`<div class="data-summary">Week ${esc(d.league.currentWeek)} · Checked ${esc(date(d.generatedAt))} · ${d.adviceReady?'ESPN / schedule ready':'Advice withheld: check data below'}</div>${freshness(d.freshness)}`}
+function renderAll(){renderSourceStatus();renderCurrent()}
 function renderCurrent(){if(!state.data&&state.current!=='settings')return;({dashboard:renderDashboard,lineup:renderLineup,matchups:renderMatchups,compare:renderCompare,waivers:renderWaivers,trades:renderTrades,settings:renderSettings})[state.current]()}
 
 function renderDashboard(){

@@ -4,7 +4,7 @@ import {analyzeRoster,optimizeLineup,bestAndToughestMatchups,buildScheduleOutloo
 import {recommendWaiverMoves,discoverTradeTargets,evaluateBilateralTrade,byeCoverage,DECISION_METHOD} from './decisions.js';
 import {json,HttpError,readJson} from './http.js';
 import {buildWeatherLookup} from './weather.js';
-import {fetchNews,fetchPlayerNews} from './news.js';
+import {fetchNews} from './news.js';
 import {STARTER_SLOT_IDS} from './constants.js';
 import {planWaivers,injuryHolds,WAIVER_METHOD} from './waiver-plan.js';
 import {attachInjuryEvidence,validateInjuryEvidence} from './injury-evidence.js';
@@ -101,9 +101,7 @@ async function recordVisit(env,state,roster,actions) {
 
 export async function buildWorkspace(env,opts={}) {
   const state=await resolve(env,opts),ctx=await context(env,state,state.team.roster),roster=analyzeRoster(state.team.roster,ctx),lineup=optimizeLineup(roster,state.bundle.league.lineupSlotCounts,state.team.roster);
-  const playerNews=await fetchPlayerNews(env,state.team.roster,{force:opts.force});
-  ctx.news=[...new Map([...playerNews.items,...ctx.news].map(n=>[n.url,n])).values()];
-  ctx.freshness.playerNews={status:playerNews.checks.length===playerNews.requested&&playerNews.checks.every(c=>Date.now()-Date.parse(c.checkedAt)<1800000)?'fresh':'partial',updatedAt:playerNews.checks.map(c=>c.checkedAt).sort()[0]||null,coverage:`Player-specific ESPN headlines checked for ${playerNews.checks.length}/${playerNews.requested} roster players; not a complete practice/inactive feed.`};
+  ctx.freshness.playerNews={status:'missing',updatedAt:null,coverage:'Credential-free browser player-news check pending. ESPN public news is unavailable from this Worker; roster loading does not wait for it.'};
   const schedules=await outlook(env,state,roster,ctx),actions=actionsFor(roster,lineup,ctx),visit=opts.recordVisit?await recordVisit(env,state,roster,actions):{};
   return {generatedAt:nowIso(),league:state.bundle.league,team:{id:state.team.id,name:state.team.name,record:state.team.record},opponent:selectedOpponent(state.bundle),fantasyMatchup:state.bundle.currentMatchup,
     roster,lineup,matchups:bestAndToughestMatchups(roster,6),schedules,depthPlan:byeCoverage(roster,state.bundle.league.lineupSlotCounts,schedules,{currentWeek:state.bundle.league.currentWeek}),actions,contingencies:ctx.adviceReady?contingencies(roster):[],preferences:state.preferences,riskWeights:ctx.riskWeights,
