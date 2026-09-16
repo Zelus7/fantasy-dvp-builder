@@ -5,7 +5,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {replaceDvpDataset,replacePlayerFeatures,replaceScheduleDataset} from '../src/db.js';
 const [directory,leagueId,seasonText,output]=process.argv.slice(2),season=Number(seasonText);
 if(!directory||!/^\d+$/.test(leagueId||'')||!Number.isInteger(season)||!output)throw new Error('Usage: node scripts/validate-datasets.mjs <directory> <league-id> <season> <output.sql>');
-const db=new DatabaseSync(':memory:');db.exec(readFileSync('migrations/0001_initial.sql','utf8'));
+const db=new DatabaseSync(':memory:');db.exec(readFileSync('migrations/0001_initial.sql','utf8'));db.exec(readFileSync('migrations/0002_decision_tracking.sql','utf8'));
 const writes=[],literal=value=>value==null?'NULL':typeof value==='number'?(Number.isFinite(value)?String(value):(()=>{throw new Error('Nonfinite value')})()):`'${String(value).replaceAll("'","''")}'`;
 const env={DB:{prepare(sql){const make=(args=[])=>({bind(...values){return make(values)},async first(){return db.prepare(sql).get(...args)||null},async run(){const result=db.prepare(sql).run(...args);let index=0;writes.push(sql.replaceAll('?',()=>literal(args[index++]))+';');return{meta:{changes:Number(result.changes)}}}});return make()},async batch(statements){return Promise.all(statements.map(s=>s.run()))}}};
 for(const [type,file,importer] of [['schedule',`nfl-schedule-${season}.json`,replaceScheduleDataset],['dvp',`dvp-${leagueId}-${season}.json`,replaceDvpDataset],['features',`player-features-${leagueId}-${season}.json`,replacePlayerFeatures]]){
