@@ -29,15 +29,19 @@ Model maintenance: `npm run build:model` fingerprints the calculation sources an
 
 ## Verification
 
-- JavaScript tests: 90 passing at the deployment gate.
+- JavaScript tests: 92 passing at the final deployment gate.
 - Python tests: 26 passing at the deployment gate.
 - Worker dry run, syntax checks and secret scan passed.
 - Enhanced public dataset build: 272 schedule games, 384 DvP rows, 667 player features; 360 current-season workload records, 359 matched snap records, 360 scoring-area records. Statistical coverage is Week 1, not the requested future Week 2.
 - Brown hold, Pierce/Robinson earlier deadline, reserve capacity, unavailable/locked/protected players, missing data, budget caps, immutable inputs and future-cost tradeoffs have regression coverage.
 - Isolated mobile preview tested at 390 × 844 with no horizontal overflow. External logo requests were blocked in the isolated browser; text identities and team colors remained available.
 - Existing signed-in Chrome session could not be inspected due to its URL policy. Do not represent the isolated preview as a completed live-session walkthrough.
+- A private local preview using the real normalized roster snapshot fetched 14/14 player-news feeds directly in the browser without cookies. Cloudflare-origin public ESPN news requests failed, so player news no longer blocks the server-side roster response.
+- The real-roster audit caught and fixed a future-bye restriction that incorrectly removed otherwise legal weekly streams. Future gaps now contribute their zero-slot cost and an explicit warning rather than silently suppressing the move. Unknown injury timing uses the conservative bookend for ranking.
+- The successful production refresh [35039312268](https://github.com/Zelus7/fantasy-dvp-builder/actions/runs/35039312268) verified 15 roster players, 15 historical ESPN scores, 150 available players, ready advice, and a saved snapshot. The first run failed on a historical filter request; it was repaired using the proven exact-week roster/waiver views before this success.
+- Live acquisition metadata verified $250 remaining FAAB and a $1 minimum bid. Bid-history coverage can still be unavailable; the app does not invent winning bids.
 
-Production migration, deployment, scheduled publication and live endpoint verification results are recorded below when completed.
+The additive migration and enhanced datasets are live. Auth/pairing secrets and ESPN roster state were not changed. Final promotion evidence is retained in the merged PR discussions.
 
 ## User acceptance checklist
 

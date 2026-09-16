@@ -6,19 +6,21 @@ import {analyzeRoster,optimizeLineup,bestAndToughestMatchups} from '../src/analy
 import {planWaivers as recommendWaiverMoves,injuryHolds} from '../src/waiver-plan.js';
 import {discoverTradeTargets,evaluateBilateralTrade} from '../src/decisions.js';
 import {withSecurityHeaders} from '../src/http.js';
+const snapshotFile=process.env.FCC_PREVIEW_SNAPSHOT;
+const snapshot=snapshotFile?JSON.parse(JSON.parse(await readFile(snapshotFile,'utf8'))[0].results[0].inputs_json):null;
 const settings={riskWeights:{floor:.2,median:.6,ceiling:.2},adaptiveRisk:false,fantasyPlayoffWeeks:[15,16,17]};
 let preferences={protectedIds:[],watchlistIds:[]};
-const slots={2:1,4:1,20:2};
+const slots=snapshot?.settings.slots||{2:1,4:1,20:2};
 const make=(id,name,position,value,extra={})=>({playerId:String(id),name,position,projectedPoints:value,seasonProjectedPoints:value*17,actualPoints:id===1?0:id===2?-2.2:null,eligibleSlotIds:[position==='RB'?2:4,23],proTeam:'BUF',injuryStatus:'ACTIVE',isStarter:id===1||id===3,lineupSlotId:position==='RB'?2:4,...extra});
 const context={riskWeights:settings.riskWeights,opponentLookup:{BUF:{opponent:'MIA',game:{kickoff:'2099-09-12T17:00:00Z',eventId:'fixture'}}},dvpLookup:{'WR:MIA':{percentile:80,rank:7,grade:'A',confidence:.4},'RB:MIA':{percentile:30,rank:22,grade:'D',confidence:.4}}};
-const mine=analyzeRoster([make(1,'Fixture Lead Runner','RB',20),make(2,'Fixture Bench Runner','RB',15),make(3,'Fixture Receiver','WR',5),make(4,'Fixture Injured Receiver','WR',18,{injuryStatus:'OUT',isStarter:false,lineupSlotId:20})],context);
+const mine=snapshot?.roster||analyzeRoster([make(1,'Fixture Lead Runner','RB',20),make(2,'Fixture Bench Runner','RB',15),make(3,'Fixture Receiver','WR',5),make(4,'Fixture Injured Receiver','WR',18,{injuryStatus:'OUT',isStarter:false,lineupSlotId:20})],context);
 const theirs=analyzeRoster([make(11,'Fixture Lead Receiver','WR',20),make(12,'Fixture Bench Receiver','WR',15),make(13,'Fixture Other Runner','RB',5)],context);
-const agents=analyzeRoster([make(21,'Fixture Waiver Receiver','WR',12,{status:'FREEAGENT'}),make(22,'Fixture Waiver Runner','RB',8,{status:'WAIVERS'})],context);
-const planSettings=()=>({slots,rosterCapacity:4,currentWeek:1,endWeek:17,now:Date.now(),market:{type:'FAAB',budget:250,remaining:250,minimumBid:1,verifiedAt:new Date().toISOString()},schedules:Object.fromEntries([...mine,...theirs,...agents].map(p=>[p.playerId,{weeks:Array.from({length:17},(_,i)=>({week:i+1,bye:false,missingSchedule:false}))}]))});
+const agents=snapshot?.freeAgents||analyzeRoster([make(21,'Fixture Waiver Receiver','WR',12,{status:'FREEAGENT'}),make(22,'Fixture Waiver Runner','RB',8,{status:'WAIVERS'})],context);
+const planSettings=()=>snapshot?{...snapshot.settings,now:Date.now()}:({slots,rosterCapacity:4,currentWeek:1,endWeek:17,now:Date.now(),market:{type:'FAAB',budget:250,remaining:250,minimumBid:1,verifiedAt:new Date().toISOString()},schedules:Object.fromEntries([...mine,...theirs,...agents].map(p=>[p.playerId,{weeks:Array.from({length:17},(_,i)=>({week:i+1,bye:false,missingSchedule:false}))}]))});
 const teams=[{id:'9',name:'Synthetic Preview Team',roster:mine},{id:'2',name:'Synthetic Other Team',roster:theirs}];
-const league={leagueId:'fixture',teamId:'9',seasonYear:2026,leagueName:'SYNTHETIC TEST DATA',currentWeek:1,liveWeek:1,lineupSlotCounts:slots,rosterSize:4,isDefault:true};
+const league={leagueId:'fixture',teamId:'9',seasonYear:2026,leagueName:snapshot?'LOCAL SNAPSHOT — NOT A LIVE CONNECTION':'SYNTHETIC TEST DATA',currentWeek:snapshot?.settings.currentWeek||1,liveWeek:snapshot?.settings.currentWeek||1,lineupSlotCounts:slots,rosterSize:4,isDefault:true};
 const sources=()=>({espn:{status:'fresh',updatedAt:new Date().toISOString()},statistics:{status:'stale',updatedAt:'2026-01-01T00:00:00Z',throughWeek:0,coverage:'Synthetic fixture, not your live data'},news:{status:'missing',coverage:'Fixture has no news feed'}});
-const workspace=week=>({generatedAt:new Date().toISOString(),league:{...league,currentWeek:week||1},team:teams[0],opponent:teams[1],roster:mine,lineup:optimizeLineup(mine,slots,mine),matchups:bestAndToughestMatchups(mine),schedules:{},actions:[{type:'lineup',title:'Review your WR depth',detail:'Synthetic fixture action'}],contingencies:[],preferences,riskWeights:settings.riskWeights,freshness:sources(),adviceReady:true,news:[],summary:{injuryAlerts:1,dataWarnings:['SYNTHETIC LOCAL PREVIEW — not live ESPN data']},changes:['Fixture roster change'],historical:false});
+const workspace=week=>({generatedAt:new Date().toISOString(),league:{...league,currentWeek:week||league.currentWeek},team:teams[0],opponent:teams[1],roster:mine,lineup:optimizeLineup(mine,slots,mine),matchups:bestAndToughestMatchups(mine),schedules:{},actions:[{type:'lineup',title:'Review your WR depth',detail:'Synthetic fixture action'}],contingencies:[],preferences,riskWeights:settings.riskWeights,freshness:sources(),adviceReady:true,news:[],summary:{injuryAlerts:1,dataWarnings:[snapshot?'PRIVATE LOCAL SNAPSHOT — not a live ESPN connection':'SYNTHETIC LOCAL PREVIEW — not live ESPN data']},changes:['Fixture roster change'],historical:false});
 const root=resolve('public');
 const server=http.createServer(async(req,res)=>{
   try{

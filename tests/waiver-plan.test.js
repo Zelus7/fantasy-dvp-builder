@@ -73,3 +73,17 @@ test('dropping a reserve does not create an active slot and activating IR needs 
   assert.ok(planWaivers([add],[active,reserve],opts).every(p=>p.drop?.playerId!=='Reserve'));
   assert.ok(weeklyRoster([active,reserve],opts,3).missing>0);
 });
+test('a legal weekly stream is not silently removed for a later bye gap',()=>{
+  const old=make('Old defense',5,{position:'D/ST',eligibleSlotIds:[16]}),add=make('New defense',9,{position:'D/ST',eligibleSlotIds:[16],status:'FREEAGENT'});
+  const opts={...options([old,add]),rosterCapacity:1,slots:{16:1}};
+  opts.schedules[old.playerId].weeks.find(w=>w.week===7).bye=true;
+  opts.schedules[add.playerId].weeks.find(w=>w.week===8).bye=true;
+  const result=planWaivers([add],[old],opts)[0];
+  assert.equal(result.lineupGain,4);assert.ok(result.futureCoverageWeeks.includes(8));assert.ok(result.warnings.some(w=>w.includes('extra future')));
+});
+test('unknown injury timing uses conservative bookends rather than assuming zero future stash value',()=>{
+  const unknown={...brown,injuryEvidence:null},bench=make('Bench',5),add=make('Add',15,{status:'FREEAGENT'});
+  const result=planWaivers([add],[unknown,bench],{...options([unknown,bench,add]),mode:'ros'})[0];
+  assert.equal(result.totalGain,Math.min(...result.scenarioTotals.map(s=>s.gain)));
+  assert.equal(result.comparisonScenario,'conservative return bookend');
+});
