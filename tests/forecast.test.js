@@ -79,6 +79,23 @@ test('forecast UI distinguishes research from actionable moves and escapes text'
   assert.match(forecastAudit({count:2,modelMae:3,espnMae:4,caveat:'Matched'}),/3.0 vs 4.0/);
 });
 
+test('forecast research balances positions and honors the selected position',()=>{
+  const players=['QB','RB','WR','TE'].flatMap(position=>Array.from({length:10},(_,i)=>{
+    const p={...player(),playerId:`${position}-${i}`,name:`${position} candidate ${i}`,position,game:null};
+    p.forecast=forecastFor(p,ctx);
+    p.forecast.horizons['4'].points=(position==='QB'?30:10)+i;
+    return p;
+  }));
+  const all=forecastResearch(players);
+  assert.equal((all.match(/<article/g)||[]).length,8);
+  for(const position of ['QB','RB','WR','TE'])assert.match(all,new RegExp(`${position} candidate 9`));
+  assert.ok(!all.includes('QB candidate 7'));
+  const receivers=forecastResearch(players,'WR');
+  assert.equal((receivers.match(/<article/g)||[]).length,8);
+  assert.ok(!receivers.includes('QB candidate'));assert.ok(receivers.includes('WR candidate 2'));
+  assert.match(forecastResearch(players,'K'),/Only QB, RB, WR and TE are modeled/);
+});
+
 test('forecast publications round-trip through real SQL and invalid batches keep active data',async t=>{
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
   for(const name of ['0001_initial.sql','0002_decision_tracking.sql','0003_forecast_features.sql'])db.exec(readFileSync(new URL(`../migrations/${name}`,import.meta.url),'utf8'));
