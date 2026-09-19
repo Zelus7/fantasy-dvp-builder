@@ -1,5 +1,6 @@
 import {esc,number,signed,date,empty,warnings,detail,head,metric,metricHelp,playerCard,rosterRow,waiverCard,tradeCard,freshness,playerIdentity,slot} from './ui.js';
-import {holdSection,validationPanel} from './waiver-ui.js'; import {forecastResearch,forecastAudit} from './forecast-ui.js';
+import {holdSection,validationPanel} from './waiver-ui.js'; import {forecastResearch as renderForecastResearch,forecastAudit} from './forecast-ui.js';
+const forecastResearch=players=>renderForecastResearch(players,state.position);
 import {normalizeNews,rankNews} from './model/news-format.js';
 
 const VIEWS=['dashboard','lineup','matchups','compare','waivers','trades','settings'];

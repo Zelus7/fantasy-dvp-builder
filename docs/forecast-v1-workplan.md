@@ -17,5 +17,5 @@ Checklist:
 - [x] Scheduled inference, bounded storage, freshness and fallback checks
 - [x] Visible independent forecast, usage, range and promotion status
 - [x] Frozen individual forecast versus ESPN accuracy tracking
-- [ ] Regression suite, deployment, current data refresh, signed-in browser acceptance
-- [ ] Merge and user checklist
+- [x] Regression suite, deployment, current data refresh, signed-in browser acceptance
+- [x] Merge and user checklist (implementation PR #10; verification and checklist in `forecast-v1.md`)

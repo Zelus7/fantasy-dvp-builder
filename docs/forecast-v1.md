@@ -53,12 +53,22 @@ The predeclared gate requires at least 200 observations, at least 1% lower MAE, 
 ## What changes in the app
 
 - Independent predictions, expected targets/carries, historical intervals and sample counts appear in player details and waiver explanations.
-- **Forecast lab** on Waivers surfaces available, unlocked candidates using the four-week independent forecast. This is a research list, not a legal add/drop ranking: need, replacement cost, injury context and budget still matter.
+- **Forecast lab** on Waivers surfaces available, unlocked candidates using the four-week independent forecast. It shows up to two per position, or eight within the selected position, so high-scoring quarterbacks cannot crowd out every receiver or running back. This is a research list, not a legal add/drop ranking: need, replacement cost, injury context and budget still matter.
 - ESPN weekly projections remain primary. Passing a historical-only comparison does not establish superiority over ESPN or its season projections.
 - Qualified four-week WR/TE models can replace a **purely historical** baseline only when both ESPN weekly and season projections are absent and the comparison is inside that four-week window. They are not extrapolated through the rest of the season.
 - The existing six-hour dataset workflow performs lightweight inference from committed, hash-verified parameters. It does not retrain itself against newly observed outcomes. Login/refresh shows source freshness and withholds mismatched forecasts.
 - Frozen snapshots retain independent predictions, ESPN projections and the model identifier before outcomes. Validation history reports matched, pre-kickoff point errors versus ESPN once scores exist. Individual snapshot results are not independent season-wide evidence; repeated snapshots must be deduplicated before any aggregate superiority claim.
 - No roster transactions, bids or trades are automated.
+
+## Release verification — 2026-09-19
+
+- Main implementation merged in [PR #10](https://github.com/Zelus7/fantasy-dvp-builder/pull/10), merge `5cc740663299afb5f92519276adc32a39b0d16bc`.
+- Production refresh [35444838593](https://github.com/Zelus7/fantasy-dvp-builder/actions/runs/35444838593) succeeded: 535 forecasts targeting Week 2, 667 player features, 272 scheduled games, 15 roster players, 150 loaded waiver players, 14 available previous-week scores, advice ready and an immutable snapshot saved. Missing historical scores were not filled with zeroes.
+- Calculation revision `waiver-plan-v3:f77d2c351d15`; forecast artifact `opportunity-v1:2514e8d194ca3e00`. Final Worker deployment including position-balanced research UI: `84c60d6f-ef53-4495-b045-02332358c6a5`.
+- Regression checks: 102 JavaScript tests and 40 Python tests passed; Worker dry-run, syntax checks, secret scan and implementation GitHub CI passed. Additive D1 migration applied after a private backup.
+- Signed-in Chrome: reload and explicit Refresh remained authenticated; ESPN actuals/projections remained separate from independent forecasts; unavailable-player warnings blocked model use; all three waiver horizons completed; five current-week archived decisions replayed as awaiting completed games. Older model archives are retained and covered by automated replay/fingerprint tests, not a new live historical outcome claim.
+- Mobile 390×844: dashboard and expanded forecast lab had document width 390, with readable usage/interval evidence and no horizontal overflow. Browser error/warning log was empty during acceptance checks.
+- No credentials changed, connector pairing repeated, or ESPN transactions submitted. These checks verify this release's behavior, not guaranteed forecasting superiority or a full connector re-pairing test.
 
 ## Test checklist
 
