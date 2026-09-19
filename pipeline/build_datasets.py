@@ -52,11 +52,15 @@ def position(value:Any)->str|None:
     return raw if raw in POSITIONS else None
 
 def value(row:Mapping[str,Any],names:Sequence[str])->float:
+    # nflverse renamed these columns; support both schemas without losing
+    # interceptions or double-counting component fumbles.
+    if names==('interceptions',): names=('passing_interceptions','interceptions')
+    if names==('fumbles_lost',): names=('fumbles_lost_total','fumbles_lost')
     for name in names:
         if name in row and row.get(name) is not None:
             result=num(row.get(name),math.nan)
             if math.isfinite(result): return result
-    if names==("fumbles_lost",):
+    if names==('fumbles_lost_total','fumbles_lost'):
         return sum(num(row.get(name)) for name in ("passing_fumbles_lost","rushing_fumbles_lost","receiving_fumbles_lost","sack_fumbles_lost"))
     return 0.0
 
@@ -275,6 +279,15 @@ def main()->int:
     for league in leagues:
         season=int(args.season or league['seasonYear']);through=max(1,min(22,int(args.through_week or league.get('currentWeek') or 1)));current=stats[stats['season']==season] if 'season' in stats else pd.DataFrame();prior=stats[stats['season']==season-1] if 'season' in stats else pd.DataFrame();all_teams={r['homeTeam'] for r in schedule_payloads[season]['rows']}|{r['awayTeam'] for r in schedule_payloads[season]['rows']};items=league.get('scoringItems') or []
         coverage=data_coverage(current,through);actual=coverage['actualThroughWeek'];dvp,unknown1=dvp_rows(current,prior,players,items,season,actual,all_teams);features,unknown2=feature_rows(current,prior,players,items,season,actual);features=enrich_opportunity(features,current,players,optional['snaps'],optional['pbp'],optional['depth'],actual);unknown=sorted(set(unknown1)|set(unknown2));metadata={'leagueId':str(league['leagueId']),'season':season,'throughWeek':actual,'requestedThroughWeek':through,**coverage,'generatedAt':now(),'source':'nflverse weekly player stats via nflreadpy','scoringType':league.get('scoringType'),'scoringHash':scoring_hash(items),'unsupportedScoring':[{'statId':x,'reason':'weekly feed cannot reproduce this rule exactly'} for x in unknown],'earlySeasonBlend':'prior season tapers out after six current games'};dvp_payload={'metadata':metadata,'rows':dvp};feature_payload={'metadata':metadata,'rows':features};write(output,f"dvp-{league['leagueId']}-{season}.json",dvp_payload);write(output,f"player-features-{league['leagueId']}-{season}.json",feature_payload)
+        try:
+            from .forecast import enrich_forecasts
+        except ImportError:
+            from forecast import enrich_forecasts
+        forecast_status=enrich_forecasts(features,stats,items,season,
+                                        min(18,int(args.through_week or league.get('currentWeek') or 1)))
+        metadata['forecast']=forecast_status
+        write(output,f"player-features-{league['leagueId']}-{season}.json",feature_payload)
+        print(json.dumps({'forecast':forecast_status}))
         pending.extend([('/api/internal/pipeline/dvp',dvp_payload),('/api/internal/pipeline/player-features',feature_payload)])
         print(json.dumps({'leagueId':league['leagueId'],'season':season,'throughWeek':through,'dvpRows':len(dvp),'featureRows':len(features),'unsupportedScoring':unknown}))
     if args.no_upload: validate_publication(pending)

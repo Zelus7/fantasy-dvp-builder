@@ -17,4 +17,12 @@ class SchemaTests(unittest.TestCase):
   self.assertIn('idx_data_snapshots_scope_status',sql)
   self.assertIn("status IN ('staging', 'active', 'superseded', 'failed')",sql)
 
+ def test_all_additive_migrations_preserve_existing_features(self):
+  connection=sqlite3.connect(':memory:')
+  for migration in sorted((ROOT/'migrations').glob('*.sql')):
+   connection.executescript(migration.read_text())
+  columns={r[1] for r in connection.execute('PRAGMA table_info(player_features)')}
+  self.assertIn('forecast_json',columns)
+  self.assertIn('opportunity_json',columns)
+
 if __name__=='__main__': unittest.main()

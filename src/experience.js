@@ -51,6 +51,8 @@ async function context(env,state,players) {
   freshness.futureSchedule=sourceFreshness(health.schedule?.generatedAt,24*3600,{coverage:'Stored remaining-season schedule; separate from the selected-week fallback.'});
   if(freshness.dvp.throughWeek!=null&&freshness.dvp.throughWeek<Math.max(0,Number(league.liveWeek||league.currentWeek)-1))freshness.dvp.status='stale';
   if(through!=null&&through<Math.max(0,Number(league.liveWeek||league.currentWeek)-1))freshness.statistics.status='stale';
+  const forecastMeta=health.playerFeatures?.metadata?.forecast;
+  freshness.forecast=sourceFreshness(health.playerFeatures?.generatedAt,36*3600,{status:forecastMeta?.status==='ready'&&forecastMeta.targetWeek===league.currentWeek?freshness.statistics.status:'missing',coverage:forecastMeta?.status==='ready'?`${forecastMeta.rows} forecasts for week ${forecastMeta.targetWeek}. ${forecastMeta.version}. Conditional on a recorded appearance; not a complete injury forecast.`:'No matching independent forecasts published; ESPN and historical fallback remain available.'});
   const weatherLookup=await buildWeatherLookup(games,{get:async(key,stale=false)=>(await cacheGet(env,key,stale))?.value||null,put:(key,value,ttl)=>cachePut(env,key,value,ttl)});
   freshness.weather={status:Object.keys(weatherLookup).length?'partial':'missing',coverage:`Weather available for ${Object.keys(weatherLookup).length} of ${games.length} selected-week games. Roof flags reflect venue defaults; verify retractable-roof decisions.`};
   const news=await fetchNews(env,{force:state.force});if(news)freshness.news=sourceFreshness(news.generatedAt,3*3600,{coverage:'Source-linked ESPN headlines; not a complete injury feed.'});
@@ -58,7 +60,7 @@ async function context(env,state,players) {
   const scheduleUnavailable=!games.length||games.some(g=>!Number.isFinite(stamp(g.kickoff)));
   const supportedSlots=Object.keys(league.lineupSlotCounts||{}).every(s=>[20,21,22].includes(Number(s))||STARTER_SLOT_IDS.has(Number(s)));
   const readinessReasons=[...(historical?['You selected a past week. Choose Current week for actionable advice; refreshing cannot change a historical selection.']:[]),...(bundle.cache?.stale?['The latest ESPN request failed; retained roster data is stale.']:[]),...(scheduleUnavailable||scheduleFreshness.status!=='fresh'?['The selected-week NFL schedule is missing or stale.']:[]),...(!supportedSlots?['This league uses starting slots the optimizer does not support.']:[])];
-  return {health,games,scheduleUnavailable,scheduleWarning:scheduleError,historical,news:news?.items||[],freshness,readinessReasons,
+  return {health,games,season:league.seasonYear,currentWeek:league.currentWeek,now:Date.now(),scheduleUnavailable,scheduleWarning:scheduleError,historical,news:news?.items||[],freshness,readinessReasons,
     adviceReady:!bundle.cache?.stale&&!scheduleUnavailable&&scheduleFreshness.status==='fresh'&&!historical&&supportedSlots,
     opponentLookup:buildOpponentLookup(games),dvpLookup:freshness.dvp.status==='fresh'?dvpLookup:{},featureLookup:freshness.statistics.status==='fresh'?featureLookup:{},weatherLookup,
     riskWeights:adjustRiskWeights(settings.riskWeights,bundle.currentMatchup?.projectionMargin||0,settings.adaptiveRisk),
