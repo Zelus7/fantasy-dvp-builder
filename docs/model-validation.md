@@ -2,6 +2,14 @@
 
 Reviewed at Extra High on 2026-09-15. This is decision support, not a guarantee.
 
+Historical note: the benchmark below predates the September 19 correction for
+nflverse's renamed passing-interception column. It is retained as evidence of
+the earlier selection, not as the current model scorecard. See
+[Independent opportunity forecasts](forecast-v1.md) for the current chronological
+tests, scoring correction, promotion gates and limitations. The waiver/trade
+description below records the earlier v2 screen; current waiver behavior is
+documented in [Waiver planning v3](waiver-v3-release.md).
+
 ## Historical fallback benchmark
 
 Reproduce with `python -m pipeline.backtest --config-file <local config>`.
