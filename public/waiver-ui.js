@@ -1,14 +1,21 @@
 import {esc,number,signed,date,detail,empty,warnings,head} from './ui.js';
 
 export function planDetails(p){
-  return `${p.faab?.available?`<p><strong>Bid $${p.faab.low}–$${p.faab.high}; hard spending cap $${p.faab.max}.</strong> $${p.faab.remaining} remains.</p>`:''}
+  return `${p.faab?.available?`<p><strong>Conservative value-policy range: $${p.faab.low}–$${p.faab.high}.</strong> $${p.faab.remaining} remains. Not a predicted winning price.</p>`:''}
     <p>${esc(p.faabExplanation||'Budget not verified.')}</p>
+    ${marketDetails(p.marketContext)}
     <p>${p.benchAlternative?`Already on your bench: <strong>${esc(p.benchAlternative.name)}</strong> (${number(p.benchAlternative.estimate)} this-week estimate).`:'No currently usable same-slot bench fallback was found.'}</p>
     <p>Decide by: ${esc(date(p.decisionBy))}. ESPN claim processing: ${p.claimDeadline?esc(date(p.claimDeadline)):'not supplied; check ESPN before placing a claim'}.</p>
     <p class="fine">${esc(p.explanation||'Kickoff deadlines are not waiver processing deadlines. A claim must clear first.')}</p>
     ${p.fallbackClaims?.length?`<p>Alternatives if unavailable: ${p.fallbackClaims.map(a=>`${esc(a.name)}${a.bid?` (${esc(a.bid)})`:''}${a.drop?`; drop ${esc(a.drop)}`:''}`).join(' · ')}. Choose one path; these are not cumulative claims.</p>`:''}
     ${detail('Week-by-week keep versus add/drop',`<div class="table-scroll"><table><thead><tr><th>Week</th><th>Keep roster</th><th>After move</th><th>Gain</th></tr></thead><tbody>${(p.comparison||[]).map(w=>`<tr><td>${w.week}</td><td>${w.complete?number(w.before):'Unknown'}</td><td>${w.complete?number(w.after):'Unknown'}</td><td>${w.complete?signed(w.gain):'—'}</td></tr>`).join('')}</tbody></table></div><p>Comparison scenario: ${esc(p.comparisonScenario||'planning')}. Each column uses the best available starting lineup with those players. Unfilled future slots are explicitly flagged and scored as zero, not assumed to be covered. Bench players count only when they enter a future starting lineup. Assumes no other transactions and the stated injury-return scenario.</p>`)}
     ${(p.scenarioTotals||[]).length>1?`<p>Return timing stress tests: ${p.scenarioTotals.map(s=>`${esc(s.scenario)} ${signed(s.gain)}`).join(' · ')} starter points. Scenarios have no assigned probabilities.</p>`:''}`;
+}
+
+export function marketDetails(context){
+  if(!context)return '<p>League competition has not been analyzed for this result. Refresh before deciding on a bid.</p>';
+  const {competition,history}=context;
+  return detail('Who else might bid, and what has this league paid?',`<p>${esc(competition.explanation)}</p>${competition.available?`<div class="table-scroll"><table><thead><tr><th>Rival team</th><th>FAAB left</th><th>Possible starter gain</th><th>Position depth / concerns</th></tr></thead><tbody>${competition.teams.map(t=>`<tr><td>${esc(t.teamName)}</td><td>${t.remaining==null?'Unknown':`$${t.remaining}`}</td><td>${t.missingEstimates?'Incomplete estimates':t.couldStart?`${signed(t.starterGainUpperBound)} upper bound`:'No modeled starting upgrade'}</td><td>${t.healthyPositionCount} not ruled out${t.unavailable.length?`; unavailable: ${esc(t.unavailable.join(', '))}`:''}${t.questionable.length?`; uncertain: ${esc(t.questionable.join(', '))}`:''}</td></tr>`).join('')}</tbody></table></div>`:''}<p>${esc(history.explanation)}</p>${history.sampleSize?`<p>Range $${history.low}–$${history.high}; median paid $${number(history.median)}. This median is a dollar price, not a player point estimate.</p><ul>${history.recent.map(b=>`<li>${esc(b.playerName||`${b.position} player`)}: $${b.amount} · ${esc(date(b.at))}</li>`).join('')}</ul>`:''}<p><strong>Winning probability: unavailable.</strong> We cannot see opponents' pending offers. A high budget or an injured starter indicates potential demand, not a promised bid. Your tiebreak priority matters only when dollar bids tie.</p>`);
 }
 
 export function holdSection(holds=[],roster=[]){

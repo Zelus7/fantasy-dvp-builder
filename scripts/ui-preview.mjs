@@ -6,6 +6,7 @@ import {analyzeRoster,optimizeLineup,bestAndToughestMatchups} from '../src/analy
 import {planWaivers as recommendWaiverMoves,injuryHolds} from '../src/waiver-plan.js';
 import {discoverTradeTargets,evaluateBilateralTrade} from '../src/decisions.js';
 import {withSecurityHeaders} from '../src/http.js';
+import {validateClaimPlan} from '../src/claim-plan.js';
 const snapshotFile=process.env.FCC_PREVIEW_SNAPSHOT;
 const snapshot=snapshotFile?JSON.parse(JSON.parse(await readFile(snapshotFile,'utf8'))[0].results[0].inputs_json):null;
 const settings={riskWeights:{floor:.2,median:.6,ceiling:.2},adaptiveRisk:false,fantasyPlayoffWeeks:[15,16,17]};
@@ -22,6 +23,7 @@ const league={leagueId:'fixture',teamId:'9',seasonYear:2026,leagueName:snapshot?
 const sources=()=>({espn:{status:'fresh',updatedAt:new Date().toISOString()},statistics:{status:'stale',updatedAt:'2026-01-01T00:00:00Z',throughWeek:0,coverage:'Synthetic fixture, not your live data'},news:{status:'missing',coverage:'Fixture has no news feed'}});
 const workspace=week=>({generatedAt:new Date().toISOString(),league:{...league,currentWeek:week||league.currentWeek},team:teams[0],opponent:teams[1],roster:mine,lineup:optimizeLineup(mine,slots,mine),matchups:bestAndToughestMatchups(mine),schedules:{},actions:[{type:'lineup',title:'Review your WR depth',detail:'Synthetic fixture action'}],contingencies:[],preferences,riskWeights:settings.riskWeights,freshness:sources(),adviceReady:true,news:[],summary:{injuryAlerts:1,dataWarnings:[snapshot?'PRIVATE LOCAL SNAPSHOT — not a live ESPN connection':'SYNTHETIC LOCAL PREVIEW — not live ESPN data']},changes:['Fixture roster change'],historical:false});
 const root=resolve('public');
+let claimPlan={version:0,week:league.currentWeek,claims:[],spendingLimit:0,updatedAt:null};
 const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://127.0.0.1'),path=url.pathname;
@@ -35,6 +37,15 @@ const server=http.createServer(async(req,res)=>{
       data={recommendations:recommendWaiverMoves(agents.filter(p=>!position||p.position===position),mine,{mode,...planSettings(),...preferences}),trades:discoverTradeTargets(teams,'9',{slots,...preferences}),teams,watchlist:[...mine,...agents].filter(p=>preferences.watchlistIds.includes(p.playerId)),adviceReady:true,explanation:'Synthetic calculation fixture',emptyReason:'No fixture moves pass the filters',freshness:sources()};
       if(url.searchParams.get('compute')==='browser')data.calculationInput={roster:mine,freeAgents:agents.filter(p=>!position||p.position===position),teams,yourTeamId:'9',settings:{mode,...planSettings(),...preferences},includeTrades:url.searchParams.get('trades')==='true',adviceReady:true,waiversReady:true};
     }else if(path==='/api/preferences'){preferences=body;data=preferences}
+    else if(path==='/api/claim-plan'){
+      const context={week:league.currentWeek,liveWeek:league.liveWeek,market:planSettings().market,roster:mine,freeAgents:agents,rosterCapacity:league.rosterSize,protectedIds:preferences.protectedIds,verifiedAt:new Date().toISOString()};
+      const review=validateClaimPlan(req.method==='PUT'?body:claimPlan,context);
+      if(req.method==='PUT'){
+        if(!review.valid||body.version!==claimPlan.version){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:review.errors.join(' ')||'Fixture version conflict'}}));return;}
+        claimPlan={version:claimPlan.version+1,week:review.week,claims:review.claims,spendingLimit:review.spendingLimit,updatedAt:new Date().toISOString()};
+      }
+      data={plan:claimPlan,review,context:{...context,coverage:'Synthetic player pool'},espnUrl:'https://fantasy.espn.com/',submissionEnabled:false};
+    }
     else if(path==='/api/trade-review')data=evaluateBilateralTrade(mine,theirs,body.giveIds,body.receiveIds,{slots,...preferences});
     else if(path==='/api/settings'){if(req.method==='PUT')Object.assign(settings,body);data=settings}
     else if(path==='/api/data-health')data={espn:{status:'synthetic'},playerFeatures:{count:0},schedule:{count:0}};

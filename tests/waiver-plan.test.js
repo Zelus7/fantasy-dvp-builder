@@ -28,6 +28,11 @@ test('Pierce Sunday night fallback deadline uses Robinson earlier kickoff',()=>{
   const results=planWaivers([pierce],[bench],options([pierce,bench]));
   assert.equal(results[0].decisionBy,'2026-09-20T17:00:00Z');assert.equal(results[0].benchAlternative.name,'Robinson');
 });
+test('a receiver fallback must fill its actual starting slot, not an unused ESPN superflex eligibility',()=>{
+  const starter=make('Starting QB',25,{position:'QB',eligibleSlotIds:[0,7,20,21],isStarter:true,lineupSlotId:0}),qb=make('Bench QB',18,{position:'QB',eligibleSlotIds:[0,7,20,21]}),wr=make('Bench WR',7,{eligibleSlotIds:[4,7,23,20,21]}),add=make('Target WR',12,{eligibleSlotIds:[4,7,23,20,21],status:'WAIVERS'}),players=[starter,qb,wr,add];
+  const result=planWaivers([add],[starter,qb,wr],{...options(players),slots:{0:1,4:1,20:2},rosterCapacity:4,endWeek:2})[0];
+  assert.equal(result.benchAlternative.name,'Bench WR');
+});
 test('weekly upgrade compares whole legal starting lineup, without bench multiplier',()=>{
   const starter=make('Starter',10,{isStarter:true,lineupSlotId:4}),bench=make('Bench',9),add=make('Add',14,{status:'FREEAGENT'});
   const result=planWaivers([add],[starter,bench],options([starter,bench,add]))[0];
@@ -45,7 +50,7 @@ test('missing future schedule is not interpreted as a bye or a valid season fore
 test('bid policy respects verified minimum and budget without pretending market odds',()=>{
   const market={type:'FAAB',budget:250,remaining:3,minimumBid:1,verifiedAt:new Date().toISOString()};
   const bid=bidGuidance({lineupGain:7,totalGain:20,position:'WR'},market);
-  assert.equal(bid.max,3);assert.ok(bid.low>=1);assert.match(bid.explanation,/no market estimate/);
+  assert.equal(bid.max,3);assert.ok(bid.low>=1);assert.match(bid.explanation,/not your approved spending limit/);assert.equal(bid.winProbability,null);
   assert.equal(bidGuidance({}, {...market,remaining:0}).available,false);
   assert.equal(bidGuidance({}, {...market,verifiedAt:'bad'}).available,false);
 });

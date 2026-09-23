@@ -2,7 +2,6 @@ import {optimizeLineup,eligibleForSlot} from './analysis.js';
 import {MODEL_REVISION} from './model-revision.js';
 import {learnedFallback} from './forecast.js';
 import {waiverMarketContext,historicalBidContext} from './waiver-market.js';
-import {STARTER_SLOT_IDS} from './constants.js';
 
 export const WAIVER_METHOD=`waiver-plan-v3:${MODEL_REVISION.slice(0,12)}`;
 const id=p=>String(p.playerId), round=n=>Math.round(n*10)/10;
@@ -92,10 +91,9 @@ export function bidGuidance(move,market={},now=Date.now()){
     explanation:`Conservative value-policy range: ${Math.round(fraction*100)}% of the original $${budget} budget at the upper end, limited by $${balance} remaining. This is not your approved spending limit or a market-clearing bid. ${history.sampleSize?`Recent ${move.position} winning prices range from $${history.low} to $${history.high} (${history.sampleSize} claims); player quality differs.${history.high>cap?' This policy range could be too low for the market.':''}`:'Verified recent winning prices are unavailable; do not assume this range will win.'} Review rival needs and set your own exact bid in the claim plan. No reliable success percentage is available.`};
 }
 
-function deadline(add,roster,now,drop,slots,targetSlot=null){
-  const relevantSlots=targetSlot==null?Object.keys(slots).map(Number).filter(slot=>STARTER_SLOT_IDS.has(slot)&&Number(slots[slot])>0&&eligibleForSlot(add,slot)):[targetSlot];
-  const backups=roster.filter(p=>!p.isStarter&&![21,22].includes(Number(p.lineupSlotId))&&!injured(p)&&p.eligibleForRecommendation!==false&&p.game?.kickoff&&Date.parse(p.game.kickoff)>now&&
-    relevantSlots.some(slot=>eligibleForSlot(p,slot))).sort((a,b)=>(b.median??0)-(a.median??0));
+function deadline(add,roster,now,drop){
+  const backups=roster.filter(p=>!p.isStarter&&!injured(p)&&p.eligibleForRecommendation!==false&&p.game?.kickoff&&Date.parse(p.game.kickoff)>now&&
+    (add.eligibleSlotIds||[]).some(slot=>slot!==20&&slot!==21&&eligibleForSlot(p,slot))).sort((a,b)=>(b.median??0)-(a.median??0));
   const backup=backups[0]||null,times=[add.game?.kickoff,backup?.game?.kickoff,drop?.game?.kickoff].filter(t=>t&&Date.parse(t)>now);
   return {benchAlternative:backup?{playerId:id(backup),name:backup.name,estimate:backup.median,kickoff:backup.game.kickoff}:null,
     decisionBy:times.sort((a,b)=>Date.parse(a)-Date.parse(b))[0]||null,
@@ -147,7 +145,7 @@ export function planWaivers(freeAgents,roster,settings={}){
     const result={...move.add,mode,drop:move.drop,kind,lineupGain:move.gain,totalGain,waiverValue:value,
       horizonEstimate:round(mode==='week'?(move.add.median??0):healthyBaseline(move.add)),depthGain:null,seasonCost:null,
       comparison:planning.weeks,comparisonScenario:unknownReturn?'conservative return bookend':planning.scenario,futureCoverageWeeks,scenarioTotals:comparisons.map((s,i)=>({scenario:s.scenario,gain:totals[i]})),complete,tradeoff,
-      evidence,method:WAIVER_METHOD,...deadline(move.add,roster.filter(p=>!move.drop||id(p)!==id(move.drop)),now,move.drop,slots,planning.weeks[0].starters.find(p=>p.playerId===id(move.add))?.slotId),
+      evidence,method:WAIVER_METHOD,...deadline(move.add,roster.filter(p=>!move.drop||id(p)!==id(move.drop)),now,move.drop),
       reasons:[`Add ${move.add.name}; ${move.drop?`drop ${move.drop.name}`:'use the open roster spot'}.`,
         `${move.gain>=0?'+':''}${move.gain.toFixed(1)} estimated starter points this week versus keeping your roster and using its best legal lineup.`,
         `Weeks ${currentWeek}–${last}: ${complete?totalGain.toFixed(1):'incomplete'} starter-point difference under the ${unknownReturn?'most conservative return bookend':planning.scenario} scenario. Future weeks use healthy-game baselines, not exact-week projections.`,...evidence.items],
