@@ -28,6 +28,11 @@ test('Pierce Sunday night fallback deadline uses Robinson earlier kickoff',()=>{
   const results=planWaivers([pierce],[bench],options([pierce,bench]));
   assert.equal(results[0].decisionBy,'2026-09-20T17:00:00Z');assert.equal(results[0].benchAlternative.name,'Robinson');
 });
+test('a receiver fallback must fill its actual starting slot, not an unused ESPN superflex eligibility',()=>{
+  const starter=make('Starting QB',25,{position:'QB',eligibleSlotIds:[0,7,20,21],isStarter:true,lineupSlotId:0}),qb=make('Bench QB',18,{position:'QB',eligibleSlotIds:[0,7,20,21]}),wr=make('Bench WR',7,{eligibleSlotIds:[4,7,23,20,21]}),add=make('Target WR',12,{eligibleSlotIds:[4,7,23,20,21],status:'WAIVERS'}),players=[starter,qb,wr,add];
+  const result=planWaivers([add],[starter,qb,wr],{...options(players),slots:{0:1,4:1,20:2},rosterCapacity:4,endWeek:2})[0];
+  assert.equal(result.benchAlternative.name,'Bench WR');
+});
 test('weekly upgrade compares whole legal starting lineup, without bench multiplier',()=>{
   const starter=make('Starter',10,{isStarter:true,lineupSlotId:4}),bench=make('Bench',9),add=make('Add',14,{status:'FREEAGENT'});
   const result=planWaivers([add],[starter,bench],options([starter,bench,add]))[0];

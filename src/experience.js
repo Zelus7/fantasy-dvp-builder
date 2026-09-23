@@ -141,9 +141,11 @@ export async function handleExperience(request,env) {
     if(request.method==='PUT'&&request.headers.get('origin')&&request.headers.get('origin')!==url.origin)throw new HttpError(403,'ORIGIN_DENIED','Save this plan from the command center.');
     const force=request.method==='PUT'||opts.force,state=await resolve(env,{...opts,force});
     const league=state.bundle.league,plan=await readClaimPlan(env,league);
-    const [free,games]=await Promise.all([fetchWaiverPool(env,state.league,null,{force,week:league.currentWeek}),fetchNflWeekSchedule(env,league.seasonYear,league.currentWeek,{force})]);
+    const [free,storedGames,health]=await Promise.all([fetchWaiverPool(env,state.league,null,{force,week:league.currentWeek}),getNflSchedule(env,league.seasonYear,{week:league.currentWeek}),getDataHealth(env,{leagueId:league.leagueId,season:league.seasonYear})]);
+    let games=storedGames,scheduleFreshness=sourceFreshness(health.schedule?.generatedAt,24*3600),scheduleWarnings=[];
+    if(force||!games.length||scheduleFreshness.status!=='fresh')try{const live=await fetchNflWeekSchedule(env,league.seasonYear,league.currentWeek,{force});if(live.length){games=live;scheduleFreshness=sourceFreshness(nowIso(),24*3600);}}catch{scheduleWarnings.push('Direct scoreboard refresh unavailable. Using the last verified schedule only if it is less than 24 hours old; confirm final game locks in ESPN.');}
     const market={...league.acquisition,...state.team.acquisition},kickoffs=Object.fromEntries(games.flatMap(g=>[[g.homeTeam,g.kickoff],[g.awayTeam,g.kickoff]]));
-    const context={market,roster:state.team.roster,freeAgents:free.players,kickoffs,week:league.currentWeek,liveWeek:league.liveWeek,rosterCapacity:league.rosterSize,protectedIds:state.preferences.protectedIds||[],stale:state.bundle.cache?.stale||free.cache.stale,verifiedAt:[state.bundle.cache?.updatedAt,free.cache.updatedAt].filter(Boolean).sort()[0]};
+    const context={market,roster:state.team.roster,freeAgents:free.players,kickoffs,week:league.currentWeek,liveWeek:league.liveWeek,rosterCapacity:league.rosterSize,protectedIds:state.preferences.protectedIds||[],stale:state.bundle.cache?.stale||free.cache.stale,scheduleReady:games.length>0&&scheduleFreshness.status==='fresh',warnings:scheduleWarnings,verifiedAt:[state.bundle.cache?.updatedAt,free.cache.updatedAt].filter(Boolean).sort()[0]};
     let saved=plan,review;
     if(request.method==='PUT'){
       const body=await requestObject(request);review=validateClaimPlan(body,context);

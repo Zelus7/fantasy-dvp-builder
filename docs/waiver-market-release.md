@@ -25,4 +25,8 @@ This is the first safe stage of the assisted-transaction workflow. Remaining wor
 - Browser fixture at 390 px: add recommendation, reject an insufficient limit, save a valid plan, inspect exact target/drop/bid and page width.
 - Production checks should verify actual opponent budgets, pool coverage, source readiness, fresh login/refresh, and the new worksheet. Any unavailable bid-history feed stays visibly unavailable.
 
+Live review identified and added regression coverage for explicit UTC cache timestamps, a fresh stored-schedule fallback when the direct scoreboard is blocked, and position-correct bench fallbacks (unused ESPN superflex eligibility must not suggest a quarterback as a receiver replacement).
+
+The GitHub deployment workflow currently lacks four required deployment secrets and stops before changing production. The established local Cloudflare login can deploy while preserving the existing Worker secrets; no credential values were copied into GitHub or rotated for this release.
+
 User checklist: open Waivers; expand a candidate's evidence and league competition; add it to the worksheet; review exact bid/drop/limit; save and reload; confirm this does not alter ESPN Pending Moves. Only confirm an actual ESPN transaction after checking its final summary.

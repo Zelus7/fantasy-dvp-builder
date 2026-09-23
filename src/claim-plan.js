@@ -13,11 +13,12 @@ export function claimPlanSummary(claims=[]){
 }
 
 export function validateClaimPlan(input,context={},now=Date.now()){
-  const errors=[],warnings=[],market=context.market||{},roster=context.roster||[],free=context.freeAgents||[];
+  const errors=[],warnings=[...(context.warnings||[])],market=context.market||{},roster=context.roster||[],free=context.freeAgents||[];
   if(!input||!Array.isArray(input.claims)||input.claims.length>12||!integer(input.spendingLimit)||input.spendingLimit>100000)return {valid:false,errors:['Use at most 12 claims and a nonnegative whole-dollar spending limit.'],warnings};
   if(context.week!==context.liveWeek||input.week!==context.liveWeek)errors.push('Claim plans must be reviewed for the current live week.');
   const age=now-Date.parse(context.verifiedAt);
   if(!Number.isFinite(age)||age<0||age>300000||context.stale)errors.push('Refresh ESPN roster, player availability and budget before saving or checking this plan.');
+  if(context.scheduleReady===false)errors.push('The verified schedule is missing or stale. Refresh the schedule feed before checking game locks.');
   if(market.type!=='FAAB'||!integer(market.remaining)||!integer(market.minimumBid))errors.push('Verified FAAB balance and minimum bid are required.');
   const byId=new Map(free.map(p=>[id(p.playerId),p])),owned=new Map(roster.map(p=>[id(p.playerId),p])),seen=new Set(),claims=[];
   let openClaims=0;

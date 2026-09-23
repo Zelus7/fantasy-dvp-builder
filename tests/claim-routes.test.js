@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import worker from '../src/index.js';
-import {saveCredentials,saveLeagues} from '../src/db.js';
+import {saveCredentials,saveLeagues,replaceScheduleDataset} from '../src/db.js';
 import {createSessionToken} from '../src/security.js';
 
 test('authenticated claim plans validate against fresh ESPN reads, persist, and never send transactions',async t=>{
@@ -12,10 +12,10 @@ test('authenticated claim plans validate against fresh ESPN reads, persist, and 
   const env={SESSION_SECRET:'fixture-signing-secret-32-characters',CREDENTIAL_ENCRYPTION_KEY:Buffer.alloc(32,2).toString('base64'),DB:{prepare(sql){const make=(a=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...a)||null},async all(){return {results:db.prepare(sql).all(...a)}},async run(){return {meta:{changes:Number(db.prepare(sql).run(...a).changes)}}}});return make()},async batch(statements){return Promise.all(statements.map(s=>s.run()))}}};
   await saveCredentials(env,{swid:'fixture-owner',s2:'fixture-cookie'});await saveLeagues(env,[{leagueId:'1',teamId:'9',seasonYear:2026,leagueName:'Fixture'}]);
   const player=(id,name)=>({id,fullName:name,defaultPositionId:3,eligibleSlots:[4,23],proTeamId:2,injuryStatus:'ACTIVE'});
-  let unavailable=false,requests=0;
+  let unavailable=false,scoreboardBlocked=false,requests=0;
   t.mock.method(globalThis,'fetch',async(url,options)=>{
     assert.ok(!options.method||options.method==='GET','No external writes are permitted');requests++;
-    if(String(url).includes('scoreboard'))return Response.json({events:[{id:'fixture',date:'2099-09-27T17:00:00Z',competitions:[{competitors:[{homeAway:'home',team:{abbreviation:'BUF'}},{homeAway:'away',team:{abbreviation:'MIA'}}]}]}]});
+    if(String(url).includes('scoreboard'))return scoreboardBlocked?new Response(null,{status:403}):Response.json({events:[{id:'fixture',date:'2099-09-27T17:00:00Z',competitions:[{competitors:[{homeAway:'home',team:{abbreviation:'BUF'}},{homeAway:'away',team:{abbreviation:'MIA'}}]}]}]});
     if(String(url).includes('kona_player_info'))return Response.json({players:unavailable?[]:[{player:player(21,'Fixture target'),status:'WAIVERS'},{player:player(22,'Fixture fallback'),status:'FREEAGENT'}]});
     return Response.json({id:1,seasonId:2026,scoringPeriodId:3,status:{latestScoringPeriod:3},settings:{acquisitionSettings:{isUsingAcquisitionBudget:true,acquisitionBudget:250,minimumBid:1},rosterSettings:{lineupSlotCounts:{4:1}}},teams:[{id:9,transactionCounter:{acquisitionBudgetSpent:0},roster:{entries:[{lineupSlotId:4,playerPoolEntry:{player:player(10,'Fixture drop')}}]}}]});
   });
@@ -30,6 +30,11 @@ test('authenticated claim plans validate against fresh ESPN reads, persist, and 
   assert.equal((await call({...plan,version:1,spendingLimit:5})).status,409);
   assert.equal((await call({...plan,version:1}, {}, '?week=2')).status,409);
   assert.equal((await (await call()).json()).plan.version,1);
+  scoreboardBlocked=true;
+  await replaceScheduleDataset(env,{metadata:{season:2026,throughWeek:3,generatedAt:new Date().toISOString()},rows:[{eventId:'fixture',week:3,homeTeam:'BUF',awayTeam:'MIA',kickoff:'2099-09-27T17:00:00Z'}]});
+  result=await (await call({...plan,version:1})).json();assert.equal(result.plan.version,2);assert.match(result.review.warnings.join(' '),/Direct scoreboard refresh unavailable/);
+  db.exec("UPDATE data_snapshots SET generated_at='2020-01-01T00:00:00Z' WHERE dataset_type='nfl_schedule'");
+  assert.equal((await call({...plan,version:2})).status,409);
   unavailable=true;assert.equal((await call({...plan,version:1})).status,409);
   assert.ok(requests>6);assert.equal((await (await call()).json()).plan.claims[0].bid,31);
 });
