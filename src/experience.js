@@ -1,5 +1,5 @@
 import {cacheGet,cachePut,getSettings,listLeagues,getDvpLookup,getNflSchedule,getPlayerFeatureLookup,getDataHealth,setSetting} from './db.js';
-import {fetchLeagueBundle,fetchFreeAgents,fetchNflWeekSchedule,buildOpponentLookup,selectedTeam,selectedOpponent,allLeaguePlayers,fetchHistoricalPlayerScores,fetchWinningBids} from './espn.js';
+import {fetchLeagueBundle,fetchWaiverPool,fetchNflWeekSchedule,buildOpponentLookup,selectedTeam,selectedOpponent,allLeaguePlayers,fetchHistoricalPlayerScores,fetchWinningBids} from './espn.js';
 import {analyzeRoster,optimizeLineup,bestAndToughestMatchups,buildScheduleOutlook,eligibleForSlot,adjustRiskWeights} from './analysis.js';
 import {recommendWaiverMoves,discoverTradeTargets,evaluateBilateralTrade,byeCoverage,DECISION_METHOD} from './decisions.js';
 import {json,HttpError,readJson} from './http.js';
@@ -9,6 +9,8 @@ import {STARTER_SLOT_IDS} from './constants.js';
 import {planWaivers,injuryHolds,WAIVER_METHOD} from './waiver-plan.js';
 import {attachInjuryEvidence,validateInjuryEvidence} from './injury-evidence.js';
 import {freezeDecision,decisionHistory} from './decision-store.js';
+import {validateClaimPlan} from './claim-plan.js';
+import {readClaimPlan,saveClaimPlan} from './claim-plan-store.js';
 
 const nowIso=()=>new Date().toISOString();
 const stamp=value=>value?Date.parse(String(value).includes('T')?value:String(value).replace(' ','T')+'Z'):NaN;
@@ -113,17 +115,17 @@ export async function buildWorkspace(env,opts={}) {
 
 export async function buildOpportunities(env,opts={}) {
   const state=await resolve(env,opts),mode=opts.mode||'week';if(!['week','bridge','ros'].includes(mode))throw new HttpError(400,'INVALID_HORIZON','Choose this week, four-week bridge or rest of season.');
-  const free=await fetchFreeAgents(env,state.league,opts.position||null,150,{force:opts.force,week:state.bundle.league.currentWeek});
+  const free=await fetchWaiverPool(env,state.league,opts.position||null,{force:opts.force,week:state.bundle.league.currentWeek});
   const pool=[...allLeaguePlayers(state.bundle),...free.players],ctx=await context(env,state,pool),analyzed=analyzeRoster(pool,ctx),byId=new Map(analyzed.map(p=>[String(p.playerId),p]));
   const roster=state.team.roster.map(p=>byId.get(String(p.playerId))),agents=free.players.map(p=>byId.get(String(p.playerId))),schedules=await outlook(env,state,pool,ctx);
   const settings={mode,slots:state.bundle.league.lineupSlotCounts,schedules,protectedIds:state.preferences.protectedIds||[],rosterCapacity:state.bundle.league.rosterSize,limit:24,currentWeek:state.bundle.league.currentWeek,endWeek:Math.min(18,Math.max(...(state.settings.fantasyPlayoffWeeks||[15,16,17]))),now:Date.now(),market:{...state.bundle.league.acquisition,...state.team.acquisition,verifiedAt:state.bundle.cache?.stale?null:state.bundle.cache?.updatedAt}};
-  const market=await fetchWinningBids(env,state.league,pool,{force:opts.force});Object.assign(settings.market,market);
-  const recommendations=!opts.clientCompute&&ctx.adviceReady&&!free.cache?.stale?planWaivers(agents,roster,settings):[];
   const teams=state.bundle.teams.map(team=>({...team,roster:team.roster.map(p=>byId.get(String(p.playerId)))}));
+  const market=await fetchWinningBids(env,state.league,pool,{force:opts.force});Object.assign(settings.market,market,{yourTeamId:state.team.id,slots:settings.slots,teams:teams.map(({id,name,roster,acquisition})=>({id,name,roster,acquisition}))});
+  const recommendations=!opts.clientCompute&&ctx.adviceReady&&!free.cache?.stale?planWaivers(agents,roster,settings):[];
   const trades=!opts.clientCompute&&opts.includeTrades&&ctx.adviceReady?discoverTradeTargets(teams,state.team.id,settings):[];
   const calculationInput={roster,freeAgents:agents,teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):[],yourTeamId:state.team.id,settings,position:opts.position,includeTrades:opts.includeTrades,adviceReady:ctx.adviceReady,waiversReady:ctx.adviceReady&&!free.cache?.stale};
   let snapshot=null,snapshotWarning=null;try{snapshot=await freezeDecision(env,state.bundle.league,calculationInput,ctx.freshness)}catch{snapshotWarning='This decision could not be archived; it will not count toward model validation.'}
-  return {generatedAt:nowIso(),method:WAIVER_METHOD,snapshot,snapshotWarning,market:settings.market,league:state.bundle.league,mode,recommendations,trades,holds:!opts.clientCompute&&calculationInput.waiversReady?injuryHolds(roster,agents,settings):[],adviceReady:calculationInput.waiversReady,freshness:{...ctx.freshness,waivers:sourceFreshness(free.cache?.updatedAt,300,{status:free.cache?.stale?'stale':'fresh',coverage:`${agents.length} players loaded, up to 150 sorted by ESPN ownership. Not the full waiver universe.`})},
+  return {generatedAt:nowIso(),method:WAIVER_METHOD,snapshot,snapshotWarning,market:{...settings.market,teams:undefined},league:state.bundle.league,mode,recommendations,trades,holds:!opts.clientCompute&&calculationInput.waiversReady?injuryHolds(roster,agents,settings):[],adviceReady:calculationInput.waiversReady,freshness:{...ctx.freshness,waivers:sourceFreshness(free.cache?.updatedAt,300,{status:free.cache?.stale?'stale':'fresh',coverage:free.coverage})},
     teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):undefined,
     calculationInput:opts.clientCompute?calculationInput:undefined,
     watchlist:analyzed.filter(p=>(state.preferences.watchlistIds||[]).includes(String(p.playerId))),
@@ -133,8 +135,26 @@ export async function buildOpportunities(env,opts={}) {
 
 export async function handleExperience(request,env) {
   const url=new URL(request.url),path=({'/api/dashboard':'/api/workspace','/api/waivers':'/api/opportunities','/api/trade':'/api/trade-review'})[url.pathname]||url.pathname;
-  if(!['/api/workspace','/api/opportunities','/api/trade-review','/api/preferences','/api/history','/api/recommendation-history','/api/injury-evidence','/api/decision-history','/api/decision-replay','/api/decision-feedback'].includes(path))return null;
+  if(!['/api/workspace','/api/opportunities','/api/trade-review','/api/preferences','/api/history','/api/recommendation-history','/api/injury-evidence','/api/decision-history','/api/decision-replay','/api/decision-feedback','/api/claim-plan'].includes(path))return null;
   const opts=parseOptions(url);
+  if(path==='/api/claim-plan'&&['GET','PUT'].includes(request.method)){
+    if(request.method==='PUT'&&request.headers.get('origin')&&request.headers.get('origin')!==url.origin)throw new HttpError(403,'ORIGIN_DENIED','Save this plan from the command center.');
+    const force=request.method==='PUT'||opts.force,state=await resolve(env,{...opts,force});
+    const league=state.bundle.league,plan=await readClaimPlan(env,league);
+    const [free,games]=await Promise.all([fetchWaiverPool(env,state.league,null,{force,week:league.currentWeek}),fetchNflWeekSchedule(env,league.seasonYear,league.currentWeek,{force})]);
+    const market={...league.acquisition,...state.team.acquisition},kickoffs=Object.fromEntries(games.flatMap(g=>[[g.homeTeam,g.kickoff],[g.awayTeam,g.kickoff]]));
+    const context={market,roster:state.team.roster,freeAgents:free.players,kickoffs,week:league.currentWeek,liveWeek:league.liveWeek,rosterCapacity:league.rosterSize,protectedIds:state.preferences.protectedIds||[],stale:state.bundle.cache?.stale||free.cache.stale,verifiedAt:[state.bundle.cache?.updatedAt,free.cache.updatedAt].filter(Boolean).sort()[0]};
+    let saved=plan,review;
+    if(request.method==='PUT'){
+      const body=await requestObject(request);review=validateClaimPlan(body,context);
+      if(!review.valid)throw new HttpError(409,'PLAN_NOT_READY',review.errors.join(' '));
+      saved=await saveClaimPlan(env,league,body.version,review);
+    }else review=validateClaimPlan({...plan,week:plan.week??league.currentWeek},context);
+    const player=p=>({playerId:p.playerId,name:p.name,position:p.position,injuryStatus:p.injuryStatus,status:p.status});
+    return json({plan:saved,review,context:{week:league.currentWeek,liveWeek:league.liveWeek,market,freeAgents:free.players.map(player),roster:state.team.roster.map(player),coverage:free.coverage},
+      espnUrl:`https://fantasy.espn.com/football/team?leagueId=${encodeURIComponent(league.leagueId)}&teamId=${encodeURIComponent(league.teamId)}&seasonId=${league.seasonYear}`,
+      submissionEnabled:false,explanation:'Saved review worksheet only. The app does not submit, edit or cancel ESPN claims. Reported pending claims are user-reported, not ESPN-verified receipts.'});
+  }
   if(path==='/api/decision-feedback'&&request.method==='POST'){
     const state=await resolve(env,opts),body=await requestObject(request),row=await env.DB.prepare('SELECT inputs_json AS inputsJson FROM decision_snapshots WHERE id=? AND league_id=? AND season=?').bind(String(body.id),String(state.league.leagueId),state.league.seasonYear).first();
     if(!row)throw new HttpError(404,'SNAPSHOT_NOT_FOUND','Decision snapshot not found.');

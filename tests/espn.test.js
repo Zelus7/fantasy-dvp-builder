@@ -8,6 +8,12 @@ const body={id:1269378,seasonId:2026,scoringPeriodId:4,status:{currentMatchupPer
 test('league normalization preserves exact scoring and roster eligibility',()=>{const result=normalizeLeagueBundle(body,stored);assert.equal(result.league.scoringType,'half');assert.equal(result.league.currentWeek,4);assert.equal(result.teams[0].roster[0].projectedPoints,12.4);assert.deepEqual(result.teams[0].roster[0].eligibleSlotIds,[4,23]);assert.equal(result.currentMatchup.projectionMargin,5)});
 test('selected team and opponent resolve from stored ESPN team id',()=>{const result=normalizeLeagueBundle(body,stored);assert.equal(selectedTeam(result).id,'1');assert.equal(selectedOpponent(result).id,'2')});
 test('all league players retain fantasy-team ownership',()=>{const result=normalizeLeagueBundle(body,stored),players=allLeaguePlayers(result);assert.equal(players.length,2);assert.equal(players.find(player=>player.playerId==='202').fantasyTeamName,'Other Team')});
+test('all opponents retain budget and tiebreak position; absent balances stay unknown',()=>{
+  const raw=structuredClone(body);raw.settings.acquisitionSettings={isUsingAcquisitionBudget:true,acquisitionBudget:250,minimumBid:1};
+  raw.teams[0].transactionCounter={acquisitionBudgetSpent:40};raw.teams[0].waiverRank=3;
+  const result=normalizeLeagueBundle(raw,stored);assert.equal(result.teams[0].acquisition.remaining,210);assert.equal(result.teams[0].acquisition.waiverRank,3);assert.equal(result.teams[1].acquisition.remaining,null);
+  raw.teams[1].transactionCounter={acquisitionBudgetSpent:''};assert.equal(normalizeLeagueBundle(raw,stored).teams[1].acquisition.remaining,null);
+});
 test('NFL opponent lookup is bidirectional',()=>{const game={eventId:'g',homeTeam:'MIA',awayTeam:'BUF'};const lookup=buildOpponentLookup([game]);assert.equal(lookup.MIA.opponent,'BUF');assert.equal(lookup.BUF.opponent,'MIA')});
 
 const discoveryCredentials={swid:'test-owner',s2:'test-session'};

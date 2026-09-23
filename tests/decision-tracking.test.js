@@ -11,7 +11,7 @@ import {createHash} from 'node:crypto';
 import {MODEL_REVISION} from '../src/model-revision.js';
 
 test('archived model revision fingerprints the exact calculation sources',()=>{
-  const hash=createHash('sha256');for(const name of ['analysis','waiver-plan','decision-outcomes','constants','weights','forecast'])hash.update(readFileSync(new URL(`../src/${name}.js`,import.meta.url)));
+  const hash=createHash('sha256');for(const name of ['analysis','waiver-plan','waiver-market','decision-outcomes','constants','weights','forecast'])hash.update(readFileSync(new URL(`../src/${name}.js`,import.meta.url)));
   hash.update(readFileSync(new URL('../pipeline/models/opportunity-v1.json',import.meta.url)));
   assert.equal(MODEL_REVISION,hash.digest('hex'));
 });
