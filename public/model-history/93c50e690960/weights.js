@@ -1,0 +1,2 @@
+import {DEFAULT_RISK_WEIGHTS} from './constants.js';
+export function normalizeWeights(weights){const floor=Math.max(0,Number(weights?.floor??DEFAULT_RISK_WEIGHTS.floor)),median=Math.max(0,Number(weights?.median??DEFAULT_RISK_WEIGHTS.median)),ceiling=Math.max(0,Number(weights?.ceiling??DEFAULT_RISK_WEIGHTS.ceiling)),total=floor+median+ceiling;return !Number.isFinite(total)||total<=0?{...DEFAULT_RISK_WEIGHTS}:{floor:floor/total,median:median/total,ceiling:ceiling/total}}

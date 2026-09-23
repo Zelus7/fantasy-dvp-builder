@@ -11,6 +11,8 @@ import {attachInjuryEvidence,validateInjuryEvidence} from './injury-evidence.js'
 import {freezeDecision,decisionHistory} from './decision-store.js';
 import {validateClaimPlan} from './claim-plan.js';
 import {readClaimPlan,saveClaimPlan} from './claim-plan-store.js';
+import {reviewOfferReport,reconcileClaimPlan} from './claim-outcomes.js';
+import {readClaimOutcomes,saveClaimReceipt} from './claim-outcome-store.js';
 
 const nowIso=()=>new Date().toISOString();
 const stamp=value=>value?Date.parse(String(value).includes('T')?value:String(value).replace(' ','T')+'Z'):NaN;
@@ -135,8 +137,25 @@ export async function buildOpportunities(env,opts={}) {
 
 export async function handleExperience(request,env) {
   const url=new URL(request.url),path=({'/api/dashboard':'/api/workspace','/api/waivers':'/api/opportunities','/api/trade':'/api/trade-review'})[url.pathname]||url.pathname;
-  if(!['/api/workspace','/api/opportunities','/api/trade-review','/api/preferences','/api/history','/api/recommendation-history','/api/injury-evidence','/api/decision-history','/api/decision-replay','/api/decision-feedback','/api/claim-plan'].includes(path))return null;
+  if(!['/api/workspace','/api/opportunities','/api/trade-review','/api/preferences','/api/history','/api/recommendation-history','/api/injury-evidence','/api/decision-history','/api/decision-replay','/api/decision-feedback','/api/claim-plan','/api/claim-outcomes'].includes(path))return null;
   const opts=parseOptions(url);
+  if(path==='/api/claim-outcomes'&&['GET','POST'].includes(request.method)){
+    if(request.method==='POST'&&request.headers.get('origin')&&request.headers.get('origin')!==url.origin)throw new HttpError(403,'ORIGIN_DENIED','Record results from the command center.');
+    // Always reconcile against the live roster, never a historical-week view.
+    const state=await resolve(env,{...opts,week:null,force:request.method==='POST'||opts.force}),league=state.bundle.league,plan=await readClaimPlan(env,league);
+    const espnUrl=`https://fantasy.espn.com/football/league/offerreport?leagueId=${encodeURIComponent(league.leagueId)}`;
+    if(request.method==='POST'){
+      const body=await readJson(request,32768);
+      if(!body||body.version!==plan.version)throw new HttpError(409,'PLAN_CHANGED','Reload the current saved plan before attaching a report.');
+      let receipt;try{receipt=reviewOfferReport(body,plan,state.team.name)}catch(error){throw new HttpError(400,'INVALID_REPORT',error.message)}
+      if(body.save===true)await saveClaimReceipt(env,league,plan.version,receipt);
+      return json({preview:receipt,saved:body.save===true,submissionEnabled:false});
+    }
+    const history=await readClaimOutcomes(env,league),currentReceipt=history.find(e=>e.plan.version===plan.version)?.receipt||null;
+    return json({plan,review:reconcileClaimPlan(plan,state.team.roster,state.bundle.cache,currentReceipt),history,
+      remainingFaab:state.bundle.cache.stale?null:state.team.acquisition?.remaining,espnUrl,submissionEnabled:false,
+      explanation:'Roster observations do not prove claim execution or price. Pasted reports remain user-supplied evidence; the app cannot yet independently verify ESPN processed or pending offers.'});
+  }
   if(path==='/api/claim-plan'&&['GET','PUT'].includes(request.method)){
     if(request.method==='PUT'&&request.headers.get('origin')&&request.headers.get('origin')!==url.origin)throw new HttpError(403,'ORIGIN_DENIED','Save this plan from the command center.');
     const force=request.method==='PUT'||opts.force,state=await resolve(env,{...opts,force});

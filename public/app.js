@@ -3,6 +3,7 @@ import {holdSection,validationPanel} from './waiver-ui.js'; import {forecastRese
 const forecastResearch=players=>renderForecastResearch(players,state.position);
 import {normalizeNews,rankNews} from './model/news-format.js';
 import {mountClaimPlanner,queueRecommendation,clearClaimDrafts} from './claim-plan-ui.js';
+import {mountClaimOutcomes} from './claim-outcome-ui.js';
 
 const VIEWS=['dashboard','lineup','matchups','compare','waivers','trades','settings'];
 const state={leagues:[],settings:null,data:null,current:'dashboard',week:null,mode:'week',position:'',teams:{},opportunities:new Map(),pending:new Map(),errors:new Map(),epoch:0,lastLoad:0,loading:false};
@@ -27,7 +28,7 @@ function toast(message){clearTimeout(toastTimer);$('#toast').textContent=message
 async function run(button,work){if(button?.disabled)return;if(button)button.disabled=true;try{return await work()}catch(error){toast(error.message)}finally{if(button)button.disabled=false}}
 function errorCard(message,action='refresh'){return `<article class="card"><h3>Could not load this view</h3><p class="error">${esc(message)}</p><button class="secondary" data-action="${action}">Try again</button></article>`}
 function claimOptions(){const l=league();return {key:`${l?.leagueId}:${l?.seasonYear}:${state.data?.team.id}`,api,query:values=>params(values)}}
-function target(view,html){const section=$(`#view-${view}`);section.innerHTML=html;if(view==='waivers'&&state.data){const planner=document.createElement('section');planner.id='claim-plan';section.querySelector('.toolbar')?.after(planner);mountClaimPlanner(planner,claimOptions());}}
+function target(view,html){const section=$(`#view-${view}`);section.innerHTML=html;if(view==='waivers'&&state.data){const planner=document.createElement('section');planner.id='claim-plan';section.querySelector('.toolbar')?.after(planner);mountClaimPlanner(planner,claimOptions());const outcomes=document.createElement('section');outcomes.id='claim-outcomes';planner.before(outcomes);mountClaimOutcomes(outcomes,claimOptions());}}
 function option(value,label,selected=false){return `<option value="${esc(value)}"${selected?' selected':''}>${esc(label)}</option>`}
 const preferences=()=>state.data?.preferences||{watchlistIds:[],protectedIds:[]};
 const cards=players=>(players||[]).map(p=>playerCard(p,state.teams,preferences(),state.data?.roster.some(r=>String(r.playerId)===String(p.playerId)))).join('');

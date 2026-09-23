@@ -38,6 +38,15 @@ test('weekly upgrade compares whole legal starting lineup, without bench multipl
   const result=planWaivers([add],[starter,bench],options([starter,bench,add]))[0];
   assert.equal(result.lineupGain,4);assert.equal(result.waiverValue,4);assert.equal(result.drop,null);
 });
+test('routine defense and kicker streams never sacrifice skill-position depth',()=>{
+  for(const [position,slot] of [['D/ST',16],['K',17]]){
+    const starter=make('Old streamer',4,{position,eligibleSlotIds:[slot],isStarter:true,lineupSlotId:slot}),stash=make('Valuable stash',8),add=make('New streamer',7,{position,eligibleSlotIds:[slot],status:'FREEAGENT'}),players=[starter,stash,add];
+    const opts={...options(players),slots:{[slot]:1,20:1},rosterCapacity:2};
+    const result=planWaivers([add],[starter,stash],opts)[0];assert.equal(result.drop.playerId,starter.playerId);assert.equal(result.lineupGain,3);
+    assert.equal(planWaivers([add],[{...starter,cantCut:true},stash],opts).length,0);
+    assert.equal(planWaivers([add],[starter,stash],{...opts,rosterCapacity:3})[0].drop,null);
+  }
+});
 test('protected, owned, unavailable and locked candidates cannot become weekly claims',()=>{
   const roster=[make('Old',8)],add=make('New',12,{status:'FREEAGENT'}),opts={...options([...roster,add]),rosterCapacity:1,protectedIds:['Old']};
   assert.equal(planWaivers([add],roster,opts).length,0);
@@ -53,6 +62,8 @@ test('bid policy respects verified minimum and budget without pretending market 
   assert.equal(bid.max,3);assert.ok(bid.low>=1);assert.match(bid.explanation,/not your approved spending limit/);assert.equal(bid.winProbability,null);
   assert.equal(bidGuidance({}, {...market,remaining:0}).available,false);
   assert.equal(bidGuidance({}, {...market,verifiedAt:'bad'}).available,false);
+  assert.equal(bidGuidance({status:'FREEAGENT'},market).available,false);
+  assert.match(bidGuidance({status:'FREEAGENT'},market).explanation,/free agent, not on waivers/);
 });
 test('acquisition rules retain unknown as null and use true budget spent',()=>{
   assert.equal(acquisitionRules().remaining,null);
