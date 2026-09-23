@@ -7,6 +7,7 @@ import {planWaivers as recommendWaiverMoves,injuryHolds} from '../src/waiver-pla
 import {discoverTradeTargets,evaluateBilateralTrade} from '../src/decisions.js';
 import {withSecurityHeaders} from '../src/http.js';
 import {validateClaimPlan} from '../src/claim-plan.js';
+import {reviewOfferReport,reconcileClaimPlan} from '../src/claim-outcomes.js';
 const snapshotFile=process.env.FCC_PREVIEW_SNAPSHOT;
 const snapshot=snapshotFile?JSON.parse(JSON.parse(await readFile(snapshotFile,'utf8'))[0].results[0].inputs_json):null;
 const settings={riskWeights:{floor:.2,median:.6,ceiling:.2},adaptiveRisk:false,fantasyPlayoffWeeks:[15,16,17]};
@@ -24,6 +25,7 @@ const sources=()=>({espn:{status:'fresh',updatedAt:new Date().toISOString()},sta
 const workspace=week=>({generatedAt:new Date().toISOString(),league:{...league,currentWeek:week||league.currentWeek},team:teams[0],opponent:teams[1],roster:mine,lineup:optimizeLineup(mine,slots,mine),matchups:bestAndToughestMatchups(mine),schedules:{},actions:[{type:'lineup',title:'Review your WR depth',detail:'Synthetic fixture action'}],contingencies:[],preferences,riskWeights:settings.riskWeights,freshness:sources(),adviceReady:true,news:[],summary:{injuryAlerts:1,dataWarnings:[snapshot?'PRIVATE LOCAL SNAPSHOT — not a live ESPN connection':'SYNTHETIC LOCAL PREVIEW — not live ESPN data']},changes:['Fixture roster change'],historical:false});
 const root=resolve('public');
 let claimPlan={version:0,week:league.currentWeek,claims:[],spendingLimit:0,updatedAt:null};
+const claimHistory=[];
 const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://127.0.0.1'),path=url.pathname;
@@ -43,8 +45,16 @@ const server=http.createServer(async(req,res)=>{
       if(req.method==='PUT'){
         if(!review.valid||body.version!==claimPlan.version){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:review.errors.join(' ')||'Fixture version conflict'}}));return;}
         claimPlan={version:claimPlan.version+1,week:review.week,claims:review.claims,spendingLimit:review.spendingLimit,updatedAt:new Date().toISOString()};
+        claimHistory.unshift({plan:structuredClone(claimPlan),receipt:null});
       }
-      data={plan:claimPlan,review,context:{...context,coverage:'Synthetic player pool'},espnUrl:'https://fantasy.espn.com/',submissionEnabled:false};
+      data={plan:claimPlan,review,processedReport:claimHistory.find(h=>h.plan.version===claimPlan.version)?.receipt||null,context:{...context,coverage:'Synthetic player pool'},espnUrl:'https://fantasy.espn.com/',submissionEnabled:false};
+    }
+    else if(path==='/api/claim-outcomes'){
+      const current=claimHistory.find(h=>h.plan.version===claimPlan.version);
+      if(req.method==='POST'){
+        try{if(body.version!==claimPlan.version)throw new Error('Fixture plan version changed');const preview=reviewOfferReport(body,claimPlan,teams[0].name);if(body.save){if(current.receipt&&JSON.stringify(current.receipt)!==JSON.stringify(preview))throw new Error('Fixture report conflict');current.receipt=preview;}data={preview,saved:body.save===true};}
+        catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:error.message}}));return;}
+      }else data={plan:claimPlan,review:reconcileClaimPlan(claimPlan,mine,{updatedAt:new Date().toISOString()},current?.receipt),history:claimHistory,remainingFaab:250,espnUrl:'https://fantasy.espn.com/',explanation:'Synthetic roster observations and user-supplied reports, not independently verified receipts.'};
     }
     else if(path==='/api/trade-review')data=evaluateBilateralTrade(mine,theirs,body.giveIds,body.receiveIds,{slots,...preferences});
     else if(path==='/api/settings'){if(req.method==='PUT')Object.assign(settings,body);data=settings}

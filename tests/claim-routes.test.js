@@ -8,7 +8,7 @@ import {createSessionToken} from '../src/security.js';
 
 test('authenticated claim plans validate against fresh ESPN reads, persist, and never send transactions',async t=>{
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
-  for(const file of ['0001_initial.sql','0002_decision_tracking.sql','0004_claim_plans.sql'])db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
+  for(const file of ['0001_initial.sql','0002_decision_tracking.sql','0004_claim_plans.sql','0005_claim_outcomes.sql'])db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const env={SESSION_SECRET:'fixture-signing-secret-32-characters',CREDENTIAL_ENCRYPTION_KEY:Buffer.alloc(32,2).toString('base64'),DB:{prepare(sql){const make=(a=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...a)||null},async all(){return {results:db.prepare(sql).all(...a)}},async run(){return {meta:{changes:Number(db.prepare(sql).run(...a).changes)}}}});return make()},async batch(statements){return Promise.all(statements.map(s=>s.run()))}}};
   await saveCredentials(env,{swid:'fixture-owner',s2:'fixture-cookie'});await saveLeagues(env,[{leagueId:'1',teamId:'9',seasonYear:2026,leagueName:'Fixture'}]);
   const player=(id,name)=>({id,fullName:name,defaultPositionId:3,eligibleSlots:[4,23],proTeamId:2,injuryStatus:'ACTIVE'});
@@ -37,4 +37,18 @@ test('authenticated claim plans validate against fresh ESPN reads, persist, and 
   assert.equal((await call({...plan,version:2})).status,409);
   unavailable=true;assert.equal((await call({...plan,version:1})).status,409);
   assert.ok(requests>6);assert.equal((await (await call()).json()).plan.claims[0].bid,31);
+  const outcome=(body,origin='https://fixture.example')=>worker.fetch(new Request('https://fixture.example/api/claim-outcomes',{method:body?'POST':'GET',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),env);
+  assert.equal((await worker.fetch(new Request('https://fixture.example/api/claim-outcomes'),env)).status,401);
+  const data=await (await outcome()).json();assert.equal(data.history.length,2);assert.equal(data.review.claims[0].outcome,'unresolved');assert.equal(data.review.claims[0].onRoster,false);
+  const report={version:2,reportDate:new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York'}).format(new Date()),text:'Team 9\nFixture target BUF, WR\n$31\nAdded. F dropped Fixture drop, BUF WR to Waivers.\nTeam 9\nFixture fallback BUF, WR\n$7\nUnsuccessful. Reason: A player involved has already been dropped'};
+  assert.equal((await outcome(report,'https://attacker.example')).status,403);
+  assert.equal((await outcome({...report,version:1})).status,409);
+  let preview=await (await outcome(report)).json();assert.equal(preview.saved,false);assert.equal(preview.preview.totalPaid,31);
+  assert.equal((await (await outcome()).json()).review.receipt,null);
+  assert.equal((await outcome({...report,save:true})).status,200);
+  assert.equal((await outcome({...report,save:true})).status,200);
+  const saved=await (await outcome()).json();assert.equal(saved.review.receipt.totalPaid,31);assert.equal(saved.review.claims[0].discrepancy,true);
+  assert.equal((await (await call()).json()).processedReport.totalPaid,31);
+  assert.equal((await call({...plan,version:2})).status,409);
+  assert.equal((await outcome({...report,save:true,text:report.text.replace('Added. F dropped Fixture drop, BUF WR to Waivers.','Unsuccessful. Reason: Player has already been added to another team.')})).status,409);
 });
