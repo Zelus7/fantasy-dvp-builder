@@ -47,7 +47,7 @@ const server=http.createServer(async(req,res)=>{
         claimPlan={version:claimPlan.version+1,week:review.week,claims:review.claims,spendingLimit:review.spendingLimit,updatedAt:new Date().toISOString()};
         claimHistory.unshift({plan:structuredClone(claimPlan),receipt:null});
       }
-      data={plan:claimPlan,review,context:{...context,coverage:'Synthetic player pool'},espnUrl:'https://fantasy.espn.com/',submissionEnabled:false};
+      data={plan:claimPlan,review,processedReport:claimHistory.find(h=>h.plan.version===claimPlan.version)?.receipt||null,context:{...context,coverage:'Synthetic player pool'},espnUrl:'https://fantasy.espn.com/',submissionEnabled:false};
     }
     else if(path==='/api/claim-outcomes'){
       const current=claimHistory.find(h=>h.plan.version===claimPlan.version);

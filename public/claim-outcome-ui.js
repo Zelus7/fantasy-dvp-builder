@@ -1,6 +1,6 @@
 import {esc,date,warnings} from './ui.js';
 const label={won:'Won',outbid:'Missed',skipped:'Skipped — drop already used',unsuccessful:'Unsuccessful',unresolved:'Outcome not confirmed'};
-export function mountClaimOutcomes(element,{api,query}){
+export function mountClaimOutcomes(element,{api,query,key}){
   let data=null,busy=false,error='',preview=null,reportText='',reportDate='';
   async function load(force=false){busy=true;paint();try{data=await api(`/api/claim-outcomes?${query({force})}`);error='';}catch(e){error=e.message}finally{busy=false;paint()}}
   const receiptHtml=r=>`<p><strong>Reported spend: $${r.totalPaid}</strong> · Processing date ${esc(r.reportDate)}</p><p class="fine">${esc(r.source)}</p><div class="stack">${r.claims.map(c=>`<section class="claim-row"><h3>${esc(c.addName)} — ${esc(label[c.status]||c.status)}</h3><p>Bid $${c.bid} · Paid $${c.paid} · Conditional drop: ${esc(c.dropName||'open slot')}</p><p>${esc(c.reason)}</p><p>${c.competingOffers.length?`Other listed offers: ${c.competingOffers.map(o=>`${esc(o.teamName)} $${o.bid}`).join('; ')}`:'No other offer listed in the pasted report; this does not establish zero future demand.'}</p></section>`).join('')}</div><p class="fine">${esc(r.caveat)}</p>`;
@@ -10,7 +10,7 @@ export function mountClaimOutcomes(element,{api,query}){
     const details=element.querySelector('details');if((preview||reportText)&&details)details.open=true;
   }
   element.oninput=e=>{if(e.target.name==='reportText')reportText=e.target.value;if(e.target.name==='reportDate')reportDate=e.target.value;preview=null;const save=element.querySelector('[data-outcome="save"]');if(save)save.remove();};
-  async function submit(save){busy=true;error='';try{const r=await api(`/api/claim-outcomes?${query()}`,{method:'POST',body:JSON.stringify({version:data.plan.version,reportDate,text:reportText,save})});preview=r.preview;if(save){preview=null;reportText='';await load();}}catch(e){error=e.message;preview=null}finally{busy=false;paint()}}
+  async function submit(save){busy=true;error='';try{const r=await api(`/api/claim-outcomes?${query()}`,{method:'POST',body:JSON.stringify({version:data.plan.version,reportDate,text:reportText,save})});preview=r.preview;if(save){preview=null;reportText='';await load();window.dispatchEvent(new CustomEvent('claim-outcomes-saved',{detail:{key}}));}}catch(e){error=e.message;preview=null}finally{busy=false;paint()}}
   element.onsubmit=e=>{e.preventDefault();if(!busy)void submit(false)};
   element.onclick=e=>{const action=e.target.closest('[data-outcome]')?.dataset.outcome;if(busy)return;if(action==='reload'){preview=null;void load(true)}if(action==='save'&&preview)void submit(true)};
   void load();

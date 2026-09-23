@@ -159,7 +159,7 @@ export async function handleExperience(request,env) {
   if(path==='/api/claim-plan'&&['GET','PUT'].includes(request.method)){
     if(request.method==='PUT'&&request.headers.get('origin')&&request.headers.get('origin')!==url.origin)throw new HttpError(403,'ORIGIN_DENIED','Save this plan from the command center.');
     const force=request.method==='PUT'||opts.force,state=await resolve(env,{...opts,force});
-    const league=state.bundle.league,plan=await readClaimPlan(env,league);
+    const league=state.bundle.league,plan=await readClaimPlan(env,league),receipt=(await readClaimOutcomes(env,league)).find(h=>h.plan.version===plan.version)?.receipt||null;
     const [free,storedGames,health]=await Promise.all([fetchWaiverPool(env,state.league,null,{force,week:league.currentWeek}),getNflSchedule(env,league.seasonYear,{week:league.currentWeek}),getDataHealth(env,{leagueId:league.leagueId,season:league.seasonYear})]);
     let games=storedGames,scheduleFreshness=sourceFreshness(health.schedule?.generatedAt,24*3600),scheduleWarnings=[];
     if(force||!games.length||scheduleFreshness.status!=='fresh')try{const live=await fetchNflWeekSchedule(env,league.seasonYear,league.currentWeek,{force});if(live.length){games=live;scheduleFreshness=sourceFreshness(nowIso(),24*3600);}}catch{scheduleWarnings.push('Direct scoreboard refresh unavailable. Using the last verified schedule only if it is less than 24 hours old; confirm final game locks in ESPN.');}
@@ -167,12 +167,14 @@ export async function handleExperience(request,env) {
     const context={market,roster:state.team.roster,freeAgents:free.players,kickoffs,week:league.currentWeek,liveWeek:league.liveWeek,rosterCapacity:league.rosterSize,protectedIds:state.preferences.protectedIds||[],stale:state.bundle.cache?.stale||free.cache.stale,scheduleReady:games.length>0&&scheduleFreshness.status==='fresh',warnings:scheduleWarnings,verifiedAt:[state.bundle.cache?.updatedAt,free.cache.updatedAt].filter(Boolean).sort()[0]};
     let saved=plan,review;
     if(request.method==='PUT'){
-      const body=await requestObject(request);review=validateClaimPlan(body,context);
+      const body=await requestObject(request);
+      if(receipt&&body.claims?.length)throw new HttpError(409,'PLAN_COMPLETED','This plan has a processed report. Start a new empty worksheet before planning more claims; the old results remain archived.');
+      review=validateClaimPlan(body,context);
       if(!review.valid)throw new HttpError(409,'PLAN_NOT_READY',review.errors.join(' '));
       saved=await saveClaimPlan(env,league,body.version,review);
     }else review=validateClaimPlan({...plan,week:plan.week??league.currentWeek},context);
     const player=p=>({playerId:p.playerId,name:p.name,position:p.position,injuryStatus:p.injuryStatus,status:p.status});
-    return json({plan:saved,review,context:{week:league.currentWeek,liveWeek:league.liveWeek,market,freeAgents:free.players.map(player),roster:state.team.roster.map(player),coverage:free.coverage},
+    return json({plan:saved,review,processedReport:saved.version===plan.version?receipt:null,context:{week:league.currentWeek,liveWeek:league.liveWeek,market,freeAgents:free.players.map(player),roster:state.team.roster.map(player),coverage:free.coverage},
       espnUrl:`https://fantasy.espn.com/football/team?leagueId=${encodeURIComponent(league.leagueId)}&teamId=${encodeURIComponent(league.teamId)}&seasonId=${league.seasonYear}`,
       submissionEnabled:false,explanation:'Saved review worksheet only. The app does not submit, edit or cancel ESPN claims. Reported pending claims are user-reported, not ESPN-verified receipts.'});
   }

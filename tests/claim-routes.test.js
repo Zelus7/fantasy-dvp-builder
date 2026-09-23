@@ -48,5 +48,7 @@ test('authenticated claim plans validate against fresh ESPN reads, persist, and 
   assert.equal((await outcome({...report,save:true})).status,200);
   assert.equal((await outcome({...report,save:true})).status,200);
   const saved=await (await outcome()).json();assert.equal(saved.review.receipt.totalPaid,31);assert.equal(saved.review.claims[0].discrepancy,true);
+  assert.equal((await (await call()).json()).processedReport.totalPaid,31);
+  assert.equal((await call({...plan,version:2})).status,409);
   assert.equal((await outcome({...report,save:true,text:report.text.replace('Added. F dropped Fixture drop, BUF WR to Waivers.','Unsuccessful. Reason: Player has already been added to another team.')})).status,409);
 });
