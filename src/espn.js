@@ -2,6 +2,7 @@ import { INDOOR_TEAMS, STARTER_SLOT_IDS, BENCH_SLOT_IDS, currentNflSeason, lineu
 import { cacheGet, cachePut, getCredentials, saveLeagues, updateCredentialHealth } from './db.js';
 import { HttpError } from './http.js';
 import { weeklyPlayerStats } from './scoring.js';
+import {syncActivity,readActivity,enrichActivity} from './waiver-activity.js';
 
 const FAN_API='https://fan.api.espn.com/apis/v2/fans';
 const LEAGUE_API='https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl';
@@ -98,18 +99,37 @@ export function normalizeWinningBids(body,players=[]){
     if(tx.status!=='EXECUTED'||!['WAIVER','WAIVER_BID'].includes(tx.type)||tx.bidAmount==null||!Number.isFinite(Number(tx.bidAmount))||Number(tx.bidAmount)<0)continue;
     const item=(tx.items||[]).find(i=>i.type==='ADD'),player=byId.get(String(item?.playerId));
     if(!item||!player||tx.id==null||seen.has(String(tx.id)))continue;seen.add(String(tx.id));
-    const date=Number(tx.executionDate),at=tx.executionDate!=null&&Number.isFinite(date)&&Math.abs(date)<=8640000000000000?new Date(date).toISOString():null;
+    const date=Number(tx.processDate),at=tx.processDate!=null&&Number.isFinite(date)&&Math.abs(date)<=8640000000000000?new Date(date).toISOString():null;
     bids.push({id:String(tx.id),playerId:String(item.playerId),playerName:player.name,teamId:tx.teamId==null?null:String(tx.teamId),position:player.position,amount:Number(tx.bidAmount),at});
   }
   return bids;
 }
 export async function fetchWinningBids(env,league,players,{force=false}={}){
-  const key=`espn:bids:v2:${league.leagueId}:${league.seasonYear}`,hit=force?null:await cacheGet(env,key);if(hit)return hit.value;
   try{
-    const credentials=await credentialsOrThrow(env),body=await fetchJson(leagueUrl(league.leagueId,league.seasonYear,'?view=mTransactions2'),{headers:headers(credentials,{transactions:{limit:500}})},'ESPN completed claims');
-    const value={winningBids:normalizeWinningBids(body,players),checkedAt:new Date().toISOString(),coverage:'Up to 500 returned transactions; only explicitly executed waiver bids with identifiable players are used.'};
-    await cachePut(env,key,value,3600);return value;
-  }catch{return {winningBids:[],checkedAt:null,coverage:'Verified winning-bid history unavailable.'};}
+    const activity=await fetchWaiverActivity(env,league,{force}),archive=await readActivity(env,league),rows=enrichActivity(archive.rows,players);
+    return {winningBids:rows.filter(r=>r.status==='won'&&r.position).map(r=>({...r,amount:r.paid})),failedOffers:rows.filter(r=>r.status!=='won'&&r.position),checkedAt:activity.checkedAt,
+      historyStatus:activity.processed.status,coverage:`Archived read-only ESPN results; latest refresh covers scoring weeks ${activity.processed.weeks.map(w=>w.week).join(', ')}. ${archive.conflicts} conflicting record(s) excluded. Not a complete season or pending-rival bid feed.`};
+  }catch{return {winningBids:[],failedOffers:[],checkedAt:null,historyStatus:'unavailable',coverage:'Verified winning-bid history unavailable.'};}
+}
+export async function fetchWaiverActivity(env,league,{force=false}={}){
+  // Credentials remain request-scoped and are sent only to ESPN's fixed HTTPS origin.
+  let credentials;
+  return syncActivity(env,league,async(pending,week)=>{
+    credentials ||= await credentialsOrThrow(env);
+    const query=pending?'?view=mPendingTransactions':`?view=mTransactions2&scoringPeriodId=${week}`;
+    const url=leagueUrl(league.leagueId,league.seasonYear,query),options={method:'GET',redirect:'manual',headers:headers(credentials,pending?null:{transactions:{filterType:{value:['WAIVER','WAIVER_ERROR']}}}),signal:AbortSignal.timeout(12000)};
+    let response;
+    try{response=await fetch(url,options);}catch{const error=new Error('ESPN activity network read failed');error.activityStage='network';throw error;}
+    if([301,302,307,308].includes(response.status)){
+      const location=response.headers.get('location'),destination=location?new URL(location,url):null;
+      if(destination?.origin===new URL(LEAGUE_API).origin&&destination.pathname.startsWith(`/apis/v3/games/ffl/seasons/${league.seasonYear}/segments/0/leagues/${league.leagueId}`))response=await fetch(destination,options);
+    }
+    if(!response.ok||!response.body){const error=new Error('ESPN activity unavailable');error.upstreamStatus=response.status;throw error;}
+    const reader=response.body.getReader(),chunks=[];let size=0;
+    try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>2*1024*1024){await reader.cancel();throw new Error('ESPN activity exceeds size limit');}chunks.push(value);}}finally{reader.releaseLock();}
+    const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    try{return JSON.parse(new TextDecoder().decode(bytes));}catch{const error=new Error('ESPN activity was not JSON');error.activityStage='json';throw error;}
+  },{force});
 }
 export function selectedOpponent(bundle){return bundle.teams.find(team=>String(team.id)===String(bundle.currentMatchup?.opponentTeamId))||null}
 export function allLeaguePlayers(bundle){return bundle.teams.flatMap(team=>team.roster.map(player=>({...player,fantasyTeamId:team.id,fantasyTeamName:team.name}))) }

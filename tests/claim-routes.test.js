@@ -8,13 +8,18 @@ import {createSessionToken} from '../src/security.js';
 
 test('authenticated claim plans validate against fresh ESPN reads, persist, and never send transactions',async t=>{
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
-  for(const file of ['0001_initial.sql','0002_decision_tracking.sql','0004_claim_plans.sql','0005_claim_outcomes.sql'])db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
+  for(const file of ['0001_initial.sql','0002_decision_tracking.sql','0004_claim_plans.sql','0005_claim_outcomes.sql','0006_espn_claim_observations.sql'])db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const env={SESSION_SECRET:'fixture-signing-secret-32-characters',CREDENTIAL_ENCRYPTION_KEY:Buffer.alloc(32,2).toString('base64'),DB:{prepare(sql){const make=(a=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...a)||null},async all(){return {results:db.prepare(sql).all(...a)}},async run(){return {meta:{changes:Number(db.prepare(sql).run(...a).changes)}}}});return make()},async batch(statements){return Promise.all(statements.map(s=>s.run()))}}};
   await saveCredentials(env,{swid:'fixture-owner',s2:'fixture-cookie'});await saveLeagues(env,[{leagueId:'1',teamId:'9',seasonYear:2026,leagueName:'Fixture'}]);
   const player=(id,name)=>({id,fullName:name,defaultPositionId:3,eligibleSlots:[4,23],proTeamId:2,injuryStatus:'ACTIVE'});
   let unavailable=false,scoreboardBlocked=false,requests=0;
   t.mock.method(globalThis,'fetch',async(url,options)=>{
     assert.ok(!options.method||options.method==='GET','No external writes are permitted');requests++;
+    if(String(url).includes('mPendingTransactions'))return Response.json({id:1,seasonId:2026,pendingTransactions:[]});
+    if(String(url).includes('mTransactions2')){
+      assert.ok(new URL(url).searchParams.has('scoringPeriodId'));assert.deepEqual(JSON.parse(options.headers['x-fantasy-filter']),{transactions:{filterType:{value:['WAIVER','WAIVER_ERROR']}}});
+      return Response.json({id:1,seasonId:2026,transactions:[]});
+    }
     if(String(url).includes('scoreboard'))return scoreboardBlocked?new Response(null,{status:403}):Response.json({events:[{id:'fixture',date:'2099-09-27T17:00:00Z',competitions:[{competitors:[{homeAway:'home',team:{abbreviation:'BUF'}},{homeAway:'away',team:{abbreviation:'MIA'}}]}]}]});
     if(String(url).includes('kona_player_info'))return Response.json({players:unavailable?[]:[{player:player(21,'Fixture target'),status:'WAIVERS'},{player:player(22,'Fixture fallback'),status:'FREEAGENT'}]});
     return Response.json({id:1,seasonId:2026,scoringPeriodId:3,status:{latestScoringPeriod:3},settings:{acquisitionSettings:{isUsingAcquisitionBudget:true,acquisitionBudget:250,minimumBid:1},rosterSettings:{lineupSlotCounts:{4:1}}},teams:[{id:9,transactionCounter:{acquisitionBudgetSpent:0},roster:{entries:[{lineupSlotId:4,playerPoolEntry:{player:player(10,'Fixture drop')}}]}}]});
@@ -40,6 +45,7 @@ test('authenticated claim plans validate against fresh ESPN reads, persist, and 
   const outcome=(body,origin='https://fixture.example')=>worker.fetch(new Request('https://fixture.example/api/claim-outcomes',{method:body?'POST':'GET',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),env);
   assert.equal((await worker.fetch(new Request('https://fixture.example/api/claim-outcomes'),env)).status,401);
   const data=await (await outcome()).json();assert.equal(data.history.length,2);assert.equal(data.review.claims[0].outcome,'unresolved');assert.equal(data.review.claims[0].onRoster,false);
+  assert.equal(data.activity.pending.status,'fresh');assert.equal(data.activity.processed.status,'fresh');assert.equal(data.activity.claims[0].status,'unresolved');assert.equal(data.submissionEnabled,false);
   const report={version:2,reportDate:new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York'}).format(new Date()),text:'Team 9\nFixture target BUF, WR\n$31\nAdded. F dropped Fixture drop, BUF WR to Waivers.\nTeam 9\nFixture fallback BUF, WR\n$7\nUnsuccessful. Reason: A player involved has already been dropped'};
   assert.equal((await outcome(report,'https://attacker.example')).status,403);
   assert.equal((await outcome({...report,version:1})).status,409);

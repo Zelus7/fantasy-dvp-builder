@@ -16,4 +16,4 @@ Unit and authenticated-route coverage includes parsing copied tab/newline tables
 
 ## Still gated
 
-Automatic pending/processed-offer ingestion and supervised direct submission need a separately verified ESPN adapter. Never infer a receipt from an empty feed or a roster change. Exact-action consent, replay prevention, acceptance checks and independently verified receipts are required before enabling transaction execution.
+Read-only pending/processed ingestion is now covered by [the claim sync release](waiver-sync-release.md), including live verification and remaining coverage limits. Supervised direct submission is still gated. Never infer a receipt from an empty feed or a roster change. Exact-action consent, replay prevention, acceptance checks and independently verified receipts are required before enabling transaction execution.
