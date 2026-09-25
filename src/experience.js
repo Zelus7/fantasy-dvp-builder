@@ -1,5 +1,5 @@
 import {cacheGet,cachePut,getSettings,listLeagues,getDvpLookup,getNflSchedule,getPlayerFeatureLookup,getDataHealth,setSetting} from './db.js';
-import {fetchLeagueBundle,fetchWaiverPool,fetchNflWeekSchedule,buildOpponentLookup,selectedTeam,selectedOpponent,allLeaguePlayers,fetchHistoricalPlayerScores,fetchWinningBids} from './espn.js';
+import {fetchLeagueBundle,fetchWaiverPool,fetchNflWeekSchedule,buildOpponentLookup,selectedTeam,selectedOpponent,allLeaguePlayers,fetchHistoricalPlayerScores,fetchWinningBids,fetchWaiverActivity} from './espn.js';
 import {analyzeRoster,optimizeLineup,bestAndToughestMatchups,buildScheduleOutlook,eligibleForSlot,adjustRiskWeights} from './analysis.js';
 import {recommendWaiverMoves,discoverTradeTargets,evaluateBilateralTrade,byeCoverage,DECISION_METHOD} from './decisions.js';
 import {json,HttpError,readJson} from './http.js';
@@ -13,6 +13,7 @@ import {validateClaimPlan} from './claim-plan.js';
 import {readClaimPlan,saveClaimPlan} from './claim-plan-store.js';
 import {reviewOfferReport,reconcileClaimPlan} from './claim-outcomes.js';
 import {readClaimOutcomes,saveClaimReceipt} from './claim-outcome-store.js';
+import {readActivity,activitySummary} from './waiver-activity.js';
 
 const nowIso=()=>new Date().toISOString();
 const stamp=value=>value?Date.parse(String(value).includes('T')?value:String(value).replace(' ','T')+'Z'):NaN;
@@ -122,7 +123,7 @@ export async function buildOpportunities(env,opts={}) {
   const roster=state.team.roster.map(p=>byId.get(String(p.playerId))),agents=free.players.map(p=>byId.get(String(p.playerId))),schedules=await outlook(env,state,pool,ctx);
   const settings={mode,slots:state.bundle.league.lineupSlotCounts,schedules,protectedIds:state.preferences.protectedIds||[],rosterCapacity:state.bundle.league.rosterSize,limit:24,currentWeek:state.bundle.league.currentWeek,endWeek:Math.min(18,Math.max(...(state.settings.fantasyPlayoffWeeks||[15,16,17]))),now:Date.now(),market:{...state.bundle.league.acquisition,...state.team.acquisition,verifiedAt:state.bundle.cache?.stale?null:state.bundle.cache?.updatedAt}};
   const teams=state.bundle.teams.map(team=>({...team,roster:team.roster.map(p=>byId.get(String(p.playerId)))}));
-  const market=await fetchWinningBids(env,state.league,pool,{force:opts.force});Object.assign(settings.market,market,{yourTeamId:state.team.id,slots:settings.slots,teams:teams.map(({id,name,roster,acquisition})=>({id,name,roster,acquisition}))});
+  const market=await fetchWinningBids(env,state.bundle.league,pool,{force:opts.force});Object.assign(settings.market,market,{yourTeamId:state.team.id,slots:settings.slots,teams:teams.map(({id,name,roster,acquisition})=>({id,name,roster,acquisition}))});
   const recommendations=!opts.clientCompute&&ctx.adviceReady&&!free.cache?.stale?planWaivers(agents,roster,settings):[];
   const trades=!opts.clientCompute&&opts.includeTrades&&ctx.adviceReady?discoverTradeTargets(teams,state.team.id,settings):[];
   const calculationInput={roster,freeAgents:agents,teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):[],yourTeamId:state.team.id,settings,position:opts.position,includeTrades:opts.includeTrades,adviceReady:ctx.adviceReady,waiversReady:ctx.adviceReady&&!free.cache?.stale};
@@ -152,9 +153,15 @@ export async function handleExperience(request,env) {
       return json({preview:receipt,saved:body.save===true,submissionEnabled:false});
     }
     const history=await readClaimOutcomes(env,league),currentReceipt=history.find(e=>e.plan.version===plan.version)?.receipt||null;
-    return json({plan,review:reconcileClaimPlan(plan,state.team.roster,state.bundle.cache,currentReceipt),history,
+    let activity;
+    try{
+      const synced=await fetchWaiverActivity(env,league,{force:opts.force}),archive=await readActivity(env,league);
+      const known=[...allLeaguePlayers(state.bundle),...history.flatMap(h=>h.plan.claims.flatMap(c=>[{playerId:c.addId,name:c.addName},{playerId:c.dropId,name:c.dropName}])).filter(p=>p.playerId&&p.name)];
+      activity=activitySummary(synced,archive,league,known,state.bundle.teams,plan,state.team.roster,state.bundle.cache);
+    }catch{activity={error:'Automatic ESPN claim sync is unavailable. Saved reports and roster observations remain available.'};}
+    return json({plan,review:reconcileClaimPlan(plan,state.team.roster,state.bundle.cache,currentReceipt),history,activity,
       remainingFaab:state.bundle.cache.stale?null:state.team.acquisition?.remaining,espnUrl,submissionEnabled:false,
-      explanation:'Roster observations do not prove claim execution or price. Pasted reports remain user-supplied evidence; the app cannot yet independently verify ESPN processed or pending offers.'});
+      explanation:'Roster observations, imported reports and direct ESPN records are separate evidence. A saved worksheet is not proof of submission. Automatic sync never submits, changes or cancels a claim.'});
   }
   if(path==='/api/claim-plan'&&['GET','PUT'].includes(request.method)){
     if(request.method==='PUT'&&request.headers.get('origin')&&request.headers.get('origin')!==url.origin)throw new HttpError(403,'ORIGIN_DENIED','Save this plan from the command center.');

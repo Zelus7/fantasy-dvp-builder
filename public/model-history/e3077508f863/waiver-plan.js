@@ -1,0 +1,193 @@
+import {optimizeLineup,eligibleForSlot} from './analysis.js';
+import {MODEL_REVISION} from './model-revision.js';
+import {learnedFallback} from './forecast.js';
+import {waiverMarketContext,historicalBidContext} from './waiver-market.js';
+import {STARTER_SLOT_IDS} from './constants.js';
+
+export const WAIVER_METHOD=`waiver-plan-v3:${MODEL_REVISION.slice(0,12)}`;
+const id=p=>String(p.playerId), round=n=>Math.round(n*10)/10;
+const finite=v=>v!=null&&Number.isFinite(Number(v));
+const injured=p=>['OUT','IR','INJURY_RESERVE','DOUBTFUL','SUSPENDED','SUSPENSION'].includes(String(p.injuryStatus).toUpperCase());
+const locked=(p,now)=>p.game?.kickoff&&Date.parse(p.game.kickoff)<=now;
+
+// This is a healthy-game baseline, never a promise of availability or recovery.
+export function healthyBaseline(p,week=null,currentWeek=null){
+  if(p.team==='FA'||p.proTeam==='FA')return null;
+  const history=finite(p.feature?.seasonPpg)?Number(p.feature.seasonPpg):null;
+  if(injured(p)&&history!=null)return Math.max(0,history);
+  // Historical qualification is not evidence of superiority over ESPN. Use a
+  // learned fallback only when both ESPN projection sources are absent, and
+  // only inside the tested four-week window; never extrapolate it through ROS.
+  const learned=week>currentWeek&&week<currentWeek+4&&!finite(p.projectedPoints)&&!finite(p.seasonProjectedPoints)?learnedFallback(p,4):null;
+  if(learned!=null)return Math.max(0,learned);
+  const projection=finite(p.seasonProjectedPoints)&&Number(p.seasonProjectedPoints)>0?Number(p.seasonProjectedPoints)/17:
+    !injured(p)&&finite(p.projectedPoints)?Number(p.projectedPoints):null;
+  if(history==null&&projection==null)return null;
+  const weight=Math.min(.65,Math.max(0,Number(p.feature?.currentGames||0))/10);
+  return Math.max(0,projection==null?history:history==null?projection:projection*(1-weight)+history*weight);
+}
+
+export function returnScenario(p,week,currentWeek,scenario='planning',now=Date.now()){
+  if(week===currentWeek)return {available:p.isAvailable!==false&&p.eligibleForRecommendation!==false,uncertain:false};
+  if(!injured(p))return {available:true,uncertain:['Q','QUESTIONABLE'].includes(p.injuryStatus)};
+  const evidence=p.injuryEvidence,valid=evidence&&Date.parse(evidence.reviewBy)>now;
+  const minimum=Number(evidence?.earliestWeek)||currentWeek+1;
+  // Unknown return: bookends only, not a fabricated expected return date.
+  const returnWeek=valid?Number(evidence[`${scenario}Week`]??(scenario==='early'?minimum:19)):scenario==='early'?minimum:19;
+  return {available:week>=Math.max(minimum,returnWeek),uncertain:true,returnWeek,sourceCurrent:!!valid};
+}
+
+export function weeklyRoster(roster,settings,week,scenario='planning'){
+  const {slots={},schedules={},currentWeek=1,now=Date.now()}=settings;
+  const activeCount=roster.filter(p=>![21,22].includes(Number(p.lineupSlotId))).length;
+  let missing=0;
+  const players=roster.map(p=>{
+    const game=schedules[id(p)]?.weeks?.find(w=>w.week===week);
+    const known=week===currentWeek?!!p.game||p.isAvailable===false:!!game&&!game.missingSchedule;
+    if(!known)missing++;
+    const reserved=[21,22].includes(Number(p.lineupSlotId));
+    const activationBlocked=reserved&&(week===currentWeek||!(Number(settings.rosterCapacity)>activeCount));
+    if(activationBlocked&&week!==currentWeek&&returnScenario(p,week,currentWeek,scenario,now).available)missing++;
+    const available=!activationBlocked&&returnScenario(p,week,currentWeek,scenario,now).available&&known&&!game?.bye;
+    const value=week===currentWeek?(finite(p.median)?Number(p.median):null):healthyBaseline(p,week,currentWeek);
+    if(available&&value==null)missing++;
+    return {...p,decisionScore:value??0,hasEstimate:value!=null,isAvailable:available,
+      ...(week!==currentWeek?{game:null,isStarter:false}:{}),planValue:value??0};
+  });
+  const lineup=optimizeLineup(players,slots,week===currentWeek?players:[],week===currentWeek?now:0);
+  return {week,value:round(lineup.starters.reduce((sum,p)=>sum+p.planValue,0)),missing,
+    unfilled:lineup.unfilledSlots.length,starters:lineup.starters.map(p=>({playerId:id(p),name:p.name,slotId:p.assignedSlotId,estimate:round(p.planValue)}))};
+}
+
+export function opportunityEvidence(p){
+  const o=p.feature?.opportunity;
+  if(!o)return {quality:'missing',items:['Current-season workload evidence is unavailable.'],warnings:['Do not infer a role change from points alone.']};
+  const pct=v=>`${Math.round(v*100)}%`,items=[],warnings=[];
+  if(finite(o.targetShare))items.push(`${pct(o.targetShare)} of team targets across ${o.games} observed game(s).`);
+  if(finite(o.carryShare))items.push(`${pct(o.carryShare)} of team rushing attempts.`);
+  if(finite(o.snapShare))items.push(`${pct(o.snapShare)} offensive snap share in the latest available game (week ${o.snapWeek}).`);
+  if(finite(o.recentTargets))items.push(`${o.recentTargets.toFixed(1)} targets/game over the last ${o.recentGames} observed game(s).`);
+  if(finite(o.targetTrend))items.push(`${o.targetTrend>=0?'+':''}${o.targetTrend.toFixed(1)} targets/game versus earlier current-season games.`);
+  if(finite(o.redZoneOpportunities))items.push(`${o.redZoneOpportunities} carries + targets inside the opponent's 20 across the observed games.`);
+  if(o.depthPosition)items.push(`Latest listed depth-chart position: ${o.depthPosition}; depth charts are context, not guaranteed workload.`);
+  if(o.games<3)warnings.push('Small current-season sample: no established role trend yet.');
+  if(o.touchdownDependent)warnings.push('Recent production includes touchdowns on limited touches; repeatable volume is not established.');
+  if(o.snapShare==null)warnings.push('Snap-share data is missing.');
+  if(o.redZoneOpportunities==null)warnings.push('Scoring-area usage data is missing.');
+  return {quality:o.games>=3?'observed':'small-sample',items,warnings,throughWeek:o.throughWeek,source:o.source};
+}
+
+export function bidGuidance(move,market={},now=Date.now()){
+  if(move.status==='FREEAGENT')return {available:false,explanation:'ESPN currently lists this player as a free agent, not on waivers. Check the ESPN Add screen for availability and any acquisition cost; do not treat a FAAB policy range as a required bid.'};
+  const {budget,remaining,minimumBid,type,verifiedAt}=market;
+  if(type!=='FAAB'||![budget,remaining,minimumBid].every(finite)||!Number.isFinite(Date.parse(verifiedAt))||now<Date.parse(verifiedAt)||now-Date.parse(verifiedAt)>300000)
+    return {available:false,explanation:'No bid: a fresh FAAB budget, remaining balance and minimum bid are required. Check ESPN league settings.'};
+  const min=Math.max(0,Math.ceil(minimumBid)),balance=Math.max(0,Math.floor(remaining));
+  if(balance<min)return {available:false,explanation:'Remaining FAAB is below the league minimum bid.'};
+  // An explicit spending policy, not fitted winning odds or a dollar value of points.
+  const fraction=move.lineupGain>=5?.08:move.lineupGain>=2?.04:move.totalGain>5?.02:.01;
+  const cap=Math.min(balance,Math.max(min,Math.floor(budget*fraction)));
+  const history=historicalBidContext(move.position,market,now);
+  const low=Math.min(cap,Math.max(min,Math.floor(cap*.5))),high=cap;
+  return {available:true,low,high,max:cap,policyCeiling:cap,remaining:balance,minimumBid:min,sampleSize:history.sampleSize,marketMedian:history.median,winProbability:null,
+    explanation:`Conservative value-policy range: ${Math.round(fraction*100)}% of the original $${budget} budget at the upper end, limited by $${balance} remaining. This is not your approved spending limit or a market-clearing bid. ${history.sampleSize?`Recent ${move.position} winning prices range from $${history.low} to $${history.high} (${history.sampleSize} claims); player quality differs.${history.high>cap?' This policy range could be too low for the market.':''}`:'Verified recent winning prices are unavailable; do not assume this range will win.'} Review rival needs and set your own exact bid in the claim plan. No reliable success percentage is available.`};
+}
+
+function deadline(add,roster,now,drop,slots,targetSlot=null){
+  const relevantSlots=targetSlot==null?Object.keys(slots).map(Number).filter(slot=>STARTER_SLOT_IDS.has(slot)&&Number(slots[slot])>0&&eligibleForSlot(add,slot)):[targetSlot];
+  const backups=roster.filter(p=>!p.isStarter&&![21,22].includes(Number(p.lineupSlotId))&&!injured(p)&&p.eligibleForRecommendation!==false&&p.game?.kickoff&&Date.parse(p.game.kickoff)>now&&
+    relevantSlots.some(slot=>eligibleForSlot(p,slot))).sort((a,b)=>(b.median??0)-(a.median??0));
+  const backup=backups[0]||null,times=[add.game?.kickoff,backup?.game?.kickoff,drop?.game?.kickoff].filter(t=>t&&Date.parse(t)>now);
+  return {benchAlternative:backup?{playerId:id(backup),name:backup.name,estimate:backup.median,kickoff:backup.game.kickoff}:null,
+    decisionBy:times.sort((a,b)=>Date.parse(a)-Date.parse(b))[0]||null,
+    claimDeadline:add.waiverProcessAt||null,
+    explanation:'Decision-by is the earliest add, drop or fallback kickoff, not the waiver processing deadline. ESPN claim processing must finish before the player can be used.'};
+}
+
+export function planWaivers(freeAgents,roster,settings={}){
+  const {mode='week',slots={},protectedIds=[],rosterCapacity=null,limit=24,now=Date.now(),currentWeek=1,endWeek=17}=settings;
+  const protectedSet=new Set(protectedIds.map(String)),owned=new Set(roster.map(id));
+  const capacity=Number(rosterCapacity),active=roster.filter(p=>![21,22].includes(Number(p.lineupSlotId))).length;
+  // Injury drops require a separate explicit hold review, never an automatic churn suggestion.
+  const drops=capacity>active?[null]:roster.filter(p=>![21,22].includes(Number(p.lineupSlotId))&&!protectedSet.has(id(p))&&!p.cantCut&&!injured(p)&&!locked(p,now));
+  const candidates=freeAgents.filter(p=>!owned.has(id(p))&&['FREEAGENT','WAIVERS'].includes(p.status)&&Number(p.onTeamId||0)<=0&&!locked(p,now)&&!injured(p)&&healthyBaseline(p)!=null&&(mode!=='week'||p.isAvailable!==false&&p.eligibleForRecommendation!==false));
+  const baseline=weeklyRoster(roster,settings,currentWeek),quick=[];
+  // Screen all legal pairs first; the most promising 48 moves receive the full
+  // multiweek/scenario comparison. The UI discloses this bounded search.
+  for(const add of candidates)for(const drop of drops){
+    // Routine streaming must not consume a skill-position stash or leave two
+    // defenses/kickers. Cross-position sacrifices require a deliberate review.
+    if(['K','D/ST'].includes(add.position)&&drop&&drop.position!==add.position)continue;
+    const afterRoster=[...roster.filter(p=>!drop||id(p)!==id(drop)),{...add,isStarter:false,lineupSlotId:20}];
+    const after=weeklyRoster(afterRoster,settings,currentWeek);
+    if(after.unfilled>baseline.unfilled)continue;
+    const gain=round(after.value-baseline.value),upside=healthyBaseline(add)-(drop?healthyBaseline(drop)||0:0);
+    quick.push({add,drop,afterRoster,gain,screen:mode==='week'?gain+Math.max(-2,Math.min(2,upside*.1)):upside+gain});
+  }
+  quick.sort((a,b)=>b.screen-a.screen||id(a.add).localeCompare(id(b.add))||String(a.drop?.playerId).localeCompare(String(b.drop?.playerId)));
+  const last=mode==='bridge'?Math.min(endWeek,currentWeek+3):endWeek;
+  const weeks=Array.from({length:Math.max(1,last-currentWeek+1)},(_,i)=>currentWeek+i);
+  const scenarios=roster.some(injured)?['early','planning','late']:['planning'];
+  const unknownReturn=roster.some(p=>injured(p)&&(!p.injuryEvidence||Date.parse(p.injuryEvidence.reviewBy)<=now));
+  const before=new Map(scenarios.map(s=>[s,weeks.map(w=>weeklyRoster(roster,settings,w,s))]));
+  const results=[];
+  const screenedCounts=new Map(),shortlist=quick.filter(m=>{const n=screenedCounts.get(id(m.add))||0;screenedCounts.set(id(m.add),n+1);return n<2}).slice(0,48);
+  for(const move of shortlist){
+    const comparisons=scenarios.map(s=>({scenario:s,weeks:weeks.map((week,i)=>{
+      const b=before.get(s)[i],a=weeklyRoster(move.afterRoster,settings,week,s);
+      return {week,before:b.value,after:a.value,gain:round(a.value-b.value),complete:!b.missing&&!a.missing,coveragePreserved:a.unfilled<=b.unfilled,starters:a.starters};
+    })}));
+    const totals=comparisons.map(s=>round(s.weeks.filter(w=>w.complete).reduce((sum,w)=>sum+w.gain,0)));
+    const selected=unknownReturn?totals.indexOf(Math.min(...totals)):scenarios.indexOf('planning');
+    const planning=comparisons[selected],totalGain=totals[selected],complete=comparisons.every(s=>s.weeks.every(w=>w.complete));
+    // A later bye is a quantified future cost, not a reason to erase a legal
+    // this-week stream. Preserve current coverage and disclose future gaps.
+    const coverage=comparisons.every(s=>s.weeks[0].coveragePreserved);
+    const futureCoverageWeeks=[...new Set(comparisons.flatMap(s=>s.weeks.filter(w=>!w.coveragePreserved).map(w=>w.week)))];
+    if(!coverage||mode!=='week'&&!complete||mode==='week'&&move.gain<.5||mode!=='week'&&Math.max(...totals)<.5)continue;
+    const evidence=opportunityEvidence(move.add),tradeoff=Math.min(...totals)<0;
+    const kind=tradeoff?'Short-term tradeoff':mode==='bridge'?'Four-week bridge':move.gain>=.5?'Starter upgrade':planning.weeks.some(w=>w.gain>=.5)?'Bye / future starter':'Stash review';
+    const value=mode==='week'?move.gain:totalGain;
+    const result={...move.add,mode,drop:move.drop,kind,lineupGain:move.gain,totalGain,waiverValue:value,
+      horizonEstimate:round(mode==='week'?(move.add.median??0):healthyBaseline(move.add)),depthGain:null,seasonCost:null,
+      comparison:planning.weeks,comparisonScenario:unknownReturn?'conservative return bookend':planning.scenario,futureCoverageWeeks,scenarioTotals:comparisons.map((s,i)=>({scenario:s.scenario,gain:totals[i]})),complete,tradeoff,
+      evidence,method:WAIVER_METHOD,...deadline(move.add,roster.filter(p=>!move.drop||id(p)!==id(move.drop)),now,move.drop,slots,planning.weeks[0].starters.find(p=>p.playerId===id(move.add))?.slotId),
+      reasons:[`Add ${move.add.name}; ${move.drop?`drop ${move.drop.name}`:'use the open roster spot'}.`,
+        `${move.gain>=0?'+':''}${move.gain.toFixed(1)} estimated starter points this week versus keeping your roster and using its best legal lineup.`,
+        `Weeks ${currentWeek}–${last}: ${complete?totalGain.toFixed(1):'incomplete'} starter-point difference under the ${unknownReturn?'most conservative return bookend':planning.scenario} scenario. Future weeks use healthy-game baselines, not exact-week projections.`,...evidence.items],
+      warnings:[...evidence.warnings,...(!complete?['Future schedule is incomplete; do not treat the partial total as rest-of-season value.']:[]),
+        ...(tradeoff?['Some return scenarios favor keeping your current roster. This move needs manual review; do not sacrifice a stash blindly.']:[]),
+        ...(futureCoverageWeeks.length?[`This move creates extra future starting-slot gaps in week(s) ${futureCoverageWeeks.join(', ')}. Those empty slots count as zero in the comparison; another move would be needed.`]:[]),
+        ...(move.drop&&['QB','RB','WR','TE'].includes(move.drop.position)&&move.drop.percentOwned>=90?[`${move.drop.name} is rostered in at least 90% of ESPN leagues. Explore a trade before dropping this widely held player; lineup-only value does not measure trade-market value.`]:[]),
+        'Reconsider if injury news, role, player ownership, projections or your budget changes. Future injuries and opponents are not predicted.'],
+      alternatives:[],searchCoverage:{availablePlayers:candidates.length,pairs:quick.length,detailedPairs:shortlist.length}};
+    result.faab=bidGuidance(result,settings.market,now);result.faabExplanation=result.faab.explanation;
+    results.push(result);
+  }
+  results.sort((a,b)=>Number(a.tradeoff)-Number(b.tradeoff)||(mode==='week'?b.lineupGain-a.lineupGain:b.totalGain-a.totalGain)||b.totalGain-a.totalGain||id(a).localeCompare(id(b)));
+  const unique=[];for(const result of results){const existing=unique.find(p=>id(p)===id(result));if(existing){if(existing.alternatives.length<2)existing.alternatives.push({drop:result.drop,lineupGain:result.lineupGain,waiverValue:result.waiverValue});}else unique.push(result);}
+  return unique.slice(0,limit).map((p,i,all)=>({...p,claimPriority:i+1,marketContext:waiverMarketContext(p,settings.market,now),fallbackClaims:all.filter(a=>id(a)!==id(p)&&a.position===p.position).slice(0,2).map(a=>({playerId:id(a),name:a.name,drop:a.drop?.name,bid:a.faab.available?`$${a.faab.low}–$${a.faab.high}`:null}))}));
+}
+
+export function injuryHolds(roster,freeAgents,settings){
+  const {currentWeek=1,endWeek=17,slots={}}=settings;
+  return roster.filter(injured).map(p=>{
+    const irSlots=Number(slots[21]||0),occupied=roster.filter(r=>Number(r.lineupSlotId)===21).length;
+    const evidence=p.injuryEvidence||null;
+    const replacement=freeAgents.filter(a=>a.position===p.position&&!injured(a)&&healthyBaseline(a)!=null&&['FREEAGENT','WAIVERS'].includes(a.status)&&!Number(a.onTeamId||0)).sort((a,b)=>(healthyBaseline(b)||0)-(healthyBaseline(a)||0))[0];
+    const gains=['early','planning','late'].map(s=>{
+      let gain=0,complete=true;
+      for(let w=currentWeek;w<=endWeek;w++){
+        const hold=weeklyRoster(roster,settings,w,s),replace=weeklyRoster([...roster.filter(r=>id(r)!==id(p)),...(replacement?[{...replacement,isStarter:false,lineupSlotId:20}]:[])],settings,w,s);
+        complete&&=!hold.missing&&!replace.missing;gain+=hold.value-replace.value;
+      }
+      return {scenario:s,holdGain:round(gain),complete};
+    });
+    const known=!!evidence&&Date.parse(evidence.reviewBy)>(settings.now||Date.now());
+    return {player:p,replacement:replacement?{name:replacement.name,playerId:id(replacement)}:null,scenarios:gains,evidence,
+      recommendation:p.cantCut?'ESPN currently prevents dropping':!known?'Hold pending return evidence':gains.every(g=>g.complete&&g.holdGain>0)?'Hold favored across scenarios':gains.every(g=>g.complete&&g.holdGain<0)?'Replacement favored; verify before dropping':'Hold / replace is scenario-dependent',
+      ir:{slots:irSlots,occupied,open:Math.max(0,irSlots-occupied),eligible:(p.eligibleSlotIds||[]).includes(21)},
+      explanation:`${irSlots?'Check ESPN IR eligibility and available slots.':'This league has no IR slots; the stash consumes a bench spot.'} Compare the named replacement with keeping this player through each return scenario. No drop is executed or automatically recommended.`,
+      sourceCurrent:known};
+  });
+}
