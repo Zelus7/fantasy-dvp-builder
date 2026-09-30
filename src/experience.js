@@ -15,6 +15,7 @@ import {readClaimPlan,saveClaimPlan} from './claim-plan-store.js';
 import {reviewOfferReport,reconcileClaimPlan} from './claim-outcomes.js';
 import {readClaimOutcomes,saveClaimReceipt} from './claim-outcome-store.js';
 import {readActivity,activitySummary} from './waiver-activity.js';
+import {intelligenceCoverage,playerIntelligence} from './intelligence.js';
 
 const nowIso=()=>new Date().toISOString();
 const stamp=value=>value?Date.parse(String(value).includes('T')?value:String(value).replace(' ','T')+'Z'):NaN;
@@ -24,6 +25,12 @@ const preferenceKey=league=>`preferences:${league.leagueId}:${league.seasonYear}
 export function sourceFreshness(updatedAt,maxAgeSeconds,details={}) {
   const age=Number.isFinite(stamp(updatedAt))?Math.max(0,(Date.now()-stamp(updatedAt))/1000):null;
   return {updatedAt:updatedAt||null,ageSeconds:age==null?null:Math.round(age),status:age==null?'missing':age>maxAgeSeconds?'stale':'fresh',...details};
+}
+
+export function scheduleFallbackMessage(freshness,games){
+  return games.length&&games.every(g=>Number.isFinite(stamp(g.kickoff)))&&freshness.status==='fresh'
+    ? `Live ESPN schedule check unavailable. Using the fresh scheduled NFL dataset from ${freshness.updatedAt}. This schedule fallback does not require another refresh; other data checks still apply. Confirm final game locks in ESPN.`
+    : 'Live ESPN schedule check failed and no fresh scheduled fallback is available. Refresh is required before advice can resume.';
 }
 
 async function resolve(env,opts) {
@@ -48,7 +55,7 @@ async function requestObject(request){const body=await readJson(request,8192);if
 async function context(env,state,players) {
   const {bundle,settings}=state,league=bundle.league,health=await getDataHealth(env,{leagueId:league.leagueId,season:league.seasonYear});
   let games=await getNflSchedule(env,league.seasonYear,{week:league.currentWeek}),scheduleError=null,scheduleFreshness=sourceFreshness(health.schedule?.generatedAt,24*3600);
-  if(state.force||!games.length||scheduleFreshness.status!=='fresh')try{const live=await fetchNflWeekSchedule(env,league.seasonYear,league.currentWeek,{force:state.force});if(live.length){games=live;scheduleFreshness=sourceFreshness(nowIso(),24*3600)}}catch{scheduleError='Current schedule refresh failed; any retained schedule may have changed.'}
+  if(state.force||!games.length||scheduleFreshness.status!=='fresh')try{const live=await fetchNflWeekSchedule(env,league.seasonYear,league.currentWeek,{force:state.force});if(live.length){games=live;scheduleFreshness=sourceFreshness(nowIso(),24*3600)}}catch{scheduleError=scheduleFallbackMessage(scheduleFreshness,games);scheduleFreshness={...scheduleFreshness,fallback:true}}
   const [dvpLookup,featureLookup]=await Promise.all([getDvpLookup(env,league.leagueId,league.seasonYear),getPlayerFeatureLookup(env,league.leagueId,league.seasonYear,players.map(p=>p.playerId))]);
   const espn=sourceFreshness(bundle.cache?.updatedAt,180,{status:bundle.cache?.stale?'stale':'fresh'});
   const through=health.playerFeatures?.metadata?.actualThroughWeek??health.playerFeatures?.throughWeek??null;
@@ -59,6 +66,7 @@ async function context(env,state,players) {
   if(through!=null&&through<Math.max(0,Number(league.liveWeek||league.currentWeek)-1))freshness.statistics.status='stale';
   const forecastMeta=health.playerFeatures?.metadata?.forecast;
   freshness.forecast=sourceFreshness(health.playerFeatures?.generatedAt,36*3600,{status:forecastMeta?.status==='ready'&&forecastMeta.targetWeek===league.currentWeek?freshness.statistics.status:'missing',coverage:forecastMeta?.status==='ready'?`${forecastMeta.rows} forecasts for week ${forecastMeta.targetWeek}. ${forecastMeta.version}. Conditional on a recorded appearance; not a complete injury forecast.`:'No matching independent forecasts published; ESPN and historical fallback remain available.'});
+  Object.assign(freshness,intelligenceCoverage(health.playerFeatures?.metadata?.intelligence,players,featureLookup,{season:league.seasonYear,week:league.currentWeek}));
   const weatherLookup=await buildWeatherLookup(games,{get:async(key,stale=false)=>(await cacheGet(env,key,stale))?.value||null,put:(key,value,ttl)=>cachePut(env,key,value,ttl)});
   freshness.weather={status:Object.keys(weatherLookup).length?'partial':'missing',coverage:`Weather available for ${Object.keys(weatherLookup).length} of ${games.length} selected-week games. Roof flags reflect venue defaults; verify retractable-roof decisions.`};
   const news=await fetchNews(env,{force:state.force});if(news)freshness.news=sourceFreshness(news.generatedAt,3*3600,{coverage:'Source-linked ESPN headlines; not a complete injury feed.'});
@@ -83,6 +91,11 @@ async function outlook(env,state,players,ctx) {
 function actionsFor(roster,lineup,ctx) {
   const actions=[];
   for(const p of roster.filter(p=>p.isStarter&&p.isAvailable===false&&(!p.game?.kickoff||stamp(p.game.kickoff)>Date.now())))actions.push({type:'urgent',title:`Check ${p.name}`,detail:`${p.injuryStatus||'Unavailable'}: review this starting slot before kickoff.`,playerId:p.playerId});
+  for(const p of roster.filter(p=>p.isStarter&&p.isAvailable!==false)){
+    const evidence=playerIntelligence(p,{season:ctx.season,week:ctx.currentWeek,now:ctx.now});
+    const checks=evidence.warnings.filter(w=>w.startsWith('Limited/missed')||w.startsWith('Sources disagree'));
+    if(checks.length)actions.push({type:'urgent',title:`Availability follow-up: ${p.name}`,detail:checks.join(' '),playerId:p.playerId});
+  }
   for(const change of lineup.changes)actions.push({type:'lineup',title:change.start?`Start ${change.start.name}`:`Bench ${change.bench?.name||'the unavailable player'}`,detail:`${change.start&&change.bench?`Bench ${change.bench.name}. `:''}Follow the full recommended slot arrangement; FLEX moves may require a reshuffle. Verify availability.`,playerId:change.start?.playerId||change.bench?.playerId});
   if(!ctx.adviceReady)return [{type:'data',title:ctx.historical?'Choose Current week for advice':'Source check needed',detail:ctx.readinessReasons.join(' ')}];
   if(roster.length&&roster.every(p=>p.game?.kickoff&&stamp(p.game.kickoff)<=Date.now()))actions.push({type:'planning',title:'This week’s lineup is locked',detail:'All rostered players’ games have started. Choose the next week in the header for lineup/waiver planning, or use rest-of-season targets.'});

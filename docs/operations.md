@@ -8,6 +8,40 @@
 - Tuesday and Sunday mornings: the Worker's separate cron refreshes ESPN cache.
 - User refresh: bypass short ESPN/weather caches for the selected league.
 
+### Public usage and availability evidence
+
+The six-hour dataset job also checks these free, credential-free sources:
+
+- SumerSports' public WR table: season-to-date routes run, targets per route,
+  receiving yards per route and average target depth. Only unlocked fields are
+  read. Weekly routes, route participation, RB/TE routes and a reliable through-week
+  marker are not supplied. Snap percentage is never substituted for route share.
+- NFL.com official reports for the selected season/week: practice participation
+  and game designation. Coverage is the number of teams with published rows, not
+  all 32 by assumption. The page does not identify each row's practice day, so
+  observed-at time is shown without inventing a daily progression.
+- ESPN's public injury feed: player-linked status and a short report summary.
+  Individual report dates are preserved separately from the feed's update time.
+  Return dates are not interpreted as medical recovery forecasts.
+- The last five recorded current-season games: targets, carries, receptions,
+  receiving air yards and offensive snap share where supplied by nflverse/PFR.
+
+Route/practice identity joins require a unique normalized name, team and position;
+ESPN reports use exact ESPN IDs. Conflicting duplicate matches are not selected.
+Optional feed failures do not stop core datasets or fabricate missing values. The
+latest snapshot then marks that feed missing; archived prior snapshots remain.
+Fresh but incomplete sources are labeled **partial**, not complete. Practice and
+injury evidence expire after 12 hours; route evidence after seven days. Missing or
+wrong-week reports never establish that a player is healthy. Final inactives still
+need checking near kickoff. Login/Refresh reads the latest published snapshot; it
+does not force third-party statistics sites to publish new data.
+
+Find this information under **Usage, routes & availability evidence** in player
+details and waiver explanations. Current starter practice/availability conflicts
+also create dashboard follow-ups. These inputs provide auditable context, not new
+point multipliers or claimed calibrated injury probabilities. The existing model
+coefficients remain unchanged pending historical validation of those inputs.
+
 The refresh workflow is registered on `main` and checks out
 `release/private-web-v1` for pipeline code. Its schedule is 00:33, 06:33,
 12:33 and 18:33 UTC (GitHub may delay scheduled jobs). Manual recovery uses

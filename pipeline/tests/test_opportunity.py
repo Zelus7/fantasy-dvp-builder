@@ -35,6 +35,22 @@ class OpportunityTests(unittest.TestCase):
         row = enrich_opportunity([{'gsisId': 'absent'}], pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), 1)[0]
         self.assertIsNone(row['opportunity'])
 
+    def test_invalid_weekly_snap_percentage_remains_unknown(self):
+        row = self.fixture(snaps=[{'pfr_player_id':'pfr1','week':1,'offense_pct':60}])['opportunity']
+        self.assertIsNone(row['snapShare'])
+        self.assertIsNone(row['weeklyUsage'][0]['snapShare'])
+
+    def test_seasons_do_not_mix_and_weekly_usage_preserves_unknown(self):
+        features=[{'gsisId':'p1','season':2026}]
+        current=pd.DataFrame([{'player_id':'p1','season':2026,'week':1,'team':'BUF','targets':4,'receiving_air_yards':-2}])
+        snaps=pd.DataFrame([{'pfr_player_id':'pfr1','season':2025,'week':1,'offense_pct':1},
+                            {'pfr_player_id':'pfr1','season':2026,'week':1,'offense_pct':.6}])
+        out=enrich_opportunity(features,current,pd.DataFrame([{'gsis_id':'p1','pfr_id':'pfr1'}]),snaps,pd.DataFrame(),pd.DataFrame(),1)[0]['opportunity']
+        self.assertEqual(out['snapShare'],.6)
+        self.assertEqual(out['weeklyUsage'][0]['snapShare'],.6)
+        self.assertEqual(out['weeklyUsage'][0]['receivingAirYards'],-2)
+        self.assertIsNone(out['weeklyUsage'][0]['carries'])
+
 
 if __name__ == '__main__':
     unittest.main()

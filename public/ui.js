@@ -40,5 +40,6 @@ export function tradeCard(t,teams={}) {
 }
 
 export function freshness(sources={}) {
-  return detail('Data freshness & coverage',Object.entries(sources).map(([name,s])=>`<div class="source"><div><strong>${esc(name)}</strong><span class="status status-${esc(s.status)}">${esc(s.status)}</span></div><small>Updated ${esc(date(s.updatedAt))}${s.throughWeek!=null?` · Through week ${esc(s.throughWeek)}`:''}</small>${s.coverage?`<p>${esc(s.coverage)}</p>`:''}</div>`).join(''));
+  const labels={receivingUsage:'Receiving routes',practiceReports:'Official practice reports',injuryReports:'Injury & role reports'};
+  return detail('Data freshness & coverage',Object.entries(sources).map(([name,s])=>`<div class="source"><div><strong>${esc(labels[name]||name)}</strong><span class="status status-${esc(s.status)}">${esc(s.status)}</span></div><small>Updated ${esc(date(s.updatedAt))}${s.throughWeek!=null?` · Through week ${esc(s.throughWeek)}`:''}${s.fetchedAt?` · Checked ${esc(date(s.fetchedAt))}`:''}</small>${s.coverage?`<p>${esc(s.coverage)}</p>`:''}</div>`).join(''));
 }
