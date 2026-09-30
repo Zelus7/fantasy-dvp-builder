@@ -1,11 +1,13 @@
 import {esc,number,detail,metric,warnings} from './ui.js';
+import {intelligenceEvidence} from './intelligence-ui.js';
 
 export function forecastEvidence(p){
   if(!['QB','RB','WR','TE'].includes(p.position))return '';
   const f=p.forecast;
-  if(!f)return '<p class="fine">Independent forecast unavailable: history, matching week or fresh inputs are missing. This is not a zero-point prediction.</p>';
+  const context=intelligenceEvidence(p);
+  if(!f)return context+'<p class="fine">Independent forecast unavailable: history, matching week or fresh inputs are missing. This is not a zero-point prediction.</p>';
   const weekly=f.horizons['1'],four=f.horizons['4'];
-  return detail('Independent forecast & expected workload',`
+  return context+detail('Independent forecast & expected workload',`
     <p><strong>Independent statistical forecast—not ESPN.</strong> ${f.usable?'These estimates are conditional on playing.':'Context warning: do not use this forecast for a lineup move.'}</p>
     <div class="metric-grid">${metric(`W${f.targetWeek} points if playing`,number(weekly.points))}${metric('Expected targets',number(weekly.targets))}${metric('Expected carries',number(weekly.carries))}</div>
     <p>ESPN this week: ${number(p.projectedPoints)}. ${weekly.approvedFallback?'Qualified against the historical fallback, not against ESPN.':'Research only: the one-week model did not pass the historical promotion gate.'} ESPN remains the primary projection when available.</p>
