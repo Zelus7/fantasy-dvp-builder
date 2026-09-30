@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
-import {freezeDecision,decisionHistory} from '../src/decision-store.js';
+import {freezeDecision,decisionHistory,DECISION_STORAGE_BUDGET} from '../src/decision-store.js';
 import {sha256} from '../src/security.js';
 import {evaluateFrozenDecision} from '../src/decision-outcomes.js';
 import {WAIVER_METHOD} from '../src/waiver-plan.js';
 import {normalizeWinningBids} from '../src/espn.js';
 import {createHash} from 'node:crypto';
 import {MODEL_REVISION} from '../src/model-revision.js';
+import {decodeSnapshot,readSnapshot} from '../src/snapshot-codec.js';
 
 test('archived model revision fingerprints the exact calculation sources',()=>{
   const hash=createHash('sha256');for(const name of ['analysis','waiver-plan','waiver-market','decision-outcomes','constants','weights','forecast'])hash.update(readFileSync(new URL(`../src/${name}.js`,import.meta.url)));
@@ -23,9 +24,14 @@ test('frozen inputs are server-owned, hash-verifiable, deduplicated and immutabl
   const league={leagueId:'1',seasonYear:2026},input={waiversReady:true,roster:[{playerId:'1',projectedPoints:10}],freeAgents:[],settings:{currentWeek:2,mode:'week',now:Date.now()}};
   const first=await freezeDecision(env,league,input,{}),second=await freezeDecision(env,league,input,{});
   assert.equal(first.id,second.id);assert.equal((await decisionHistory(env,league)).length,1);
-  const row=db.prepare('SELECT * FROM decision_snapshots').get();assert.equal(row.input_hash,await sha256(row.inputs_json));
+  const row=db.prepare('SELECT * FROM decision_snapshots').get();assert.equal(row.input_hash,await sha256(await decodeSnapshot(row.inputs_json)));
   input.roster[0].projectedPoints=12;const changed=await freezeDecision(env,league,input,{});assert.notEqual(changed.id,first.id);
-  assert.equal(JSON.parse(db.prepare('SELECT inputs_json FROM decision_snapshots WHERE id=?').get(first.id).inputs_json).roster[0].projectedPoints,10);
+  assert.equal((await readSnapshot(db.prepare('SELECT inputs_json FROM decision_snapshots WHERE id=?').get(first.id).inputs_json)).roster[0].projectedPoints,10);
+  db.prepare('INSERT INTO decision_snapshots (id,league_id,season,week,mode,method,created_at,inputs_json,input_hash) VALUES (?,?,?,?,?,?,?,zeroblob(?),?)').run('budget-fixture','1',2026,2,'week','fixture','fixture',DECISION_STORAGE_BUDGET,'fixture');
+  assert.equal((await freezeDecision(env,league,input,{})).id,changed.id,'existing snapshots remain usable at the cap');
+  input.roster[0].projectedPoints=14;
+  await assert.rejects(freezeDecision(env,league,input,{}),{code:'SNAPSHOT_STORAGE_BUDGET'});
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM decision_snapshots').get().n,3,'budget guard preserves every historical row');
 });
 test('unknown historical scores are not fabricated zeroes',()=>{
   const p={playerId:'1',name:'Receiver',position:'WR',median:10,projectedPoints:10,seasonProjectedPoints:170,eligibleSlotIds:[4],isAvailable:true,game:{kickoff:'2099-01-01T00:00:00Z'}};

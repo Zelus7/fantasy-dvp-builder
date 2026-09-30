@@ -12,6 +12,7 @@ pipeline/output/
 extension/dist/
 backups/
 .artifacts/
+.firecrawl/
 .playwright-cli/
 output/playwright/
 public/model/
