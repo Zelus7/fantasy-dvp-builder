@@ -6,6 +6,7 @@ import worker from '../src/index.js';
 import {saveCredentials,saveLeagues,cachePut,replaceScheduleDataset} from '../src/db.js';
 import {createSessionToken} from '../src/security.js';
 import {freezeDecision} from '../src/decision-store.js';
+import {encodeSnapshot,decodeSnapshot,SNAPSHOT_PREFIX} from '../src/snapshot-codec.js';
 import {fetchHistoricalPlayerScores} from '../src/espn.js';
 
 test('preferences, visit history and advice gates use the real schema behind authenticated routes',async t=>{
@@ -34,7 +35,15 @@ test('preferences, visit history and advice gates use the real schema behind aut
   assert.equal((await request('/api/workspace?week=99')).status,400);
   assert.equal((await request('/api/workspace?leagueId=other')).status,409);
   assert.equal((await request('/api/preferences',null)).status,400);
-  const snapshot=await freezeDecision(env,league,{waiversReady:true,roster,freeAgents:[{playerId:'11',name:'Candidate'}],settings:{currentWeek:1,mode:'week',now:Date.now()}},{});
+  const snapshot=await freezeDecision(env,league,{waiversReady:true,roster,freeAgents:[{playerId:'11',name:'Candidate',evidence:'Synthetic evidence '.repeat(200)}],settings:{currentWeek:1,mode:'week',now:Date.now()}},{});
+  const stored=db.prepare('SELECT inputs_json FROM decision_snapshots WHERE id=?').get(snapshot.id).inputs_json;
+  assert.ok(stored.startsWith(SNAPSHOT_PREFIX));
+  for(const value of [stored,await decodeSnapshot(stored)]){
+    db.prepare('UPDATE decision_snapshots SET inputs_json=? WHERE id=?').run(value,snapshot.id);
+    const replay=await request(`/api/decision-replay?id=${snapshot.id}`);
+    assert.equal(replay.status,200);assert.equal((await replay.json()).snapshot.inputs.freeAgents[0].name,'Candidate');
+  }
+  db.prepare('UPDATE decision_snapshots SET inputs_json=? WHERE id=?').run(await encodeSnapshot(await decodeSnapshot(stored)),snapshot.id);
   const feedback=body=>worker.fetch(new Request('https://fixture.example/api/decision-feedback',{method:'POST',headers,body:JSON.stringify(body)}),env);
   assert.equal((await feedback({id:snapshot.id,status:'acquired',playerId:'11',cost:3})).status,200);
   assert.equal((await feedback({id:snapshot.id,status:'acquired',playerId:'999',cost:3})).status,400);
