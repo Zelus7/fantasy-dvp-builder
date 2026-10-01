@@ -20,9 +20,11 @@ import requests
 try:
     from .opportunity import enrich_opportunity
     from .intelligence import load_intelligence, attach_intelligence
+    from .transport import fetch_pipeline_config, response_diagnostic
 except ImportError:
     from opportunity import enrich_opportunity
     from intelligence import load_intelligence, attach_intelligence
+    from transport import fetch_pipeline_config, response_diagnostic
 
 TEAMS={"ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND","JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA","SF","TB","TEN","WSH"}
 ALIASES={"ARZ":"ARI","BLT":"BAL","CLV":"CLE","HST":"HOU","JAC":"JAX","LA":"LAR","OAK":"LV","SD":"LAC","STL":"LAR","WAS":"WSH"}
@@ -214,7 +216,7 @@ def data_coverage(frame:pd.DataFrame,through:int)->dict[str,Any]:
 def scoring_hash(items)->str:return hashlib.sha256(json.dumps(items,sort_keys=True,separators=(',',':')).encode()).hexdigest()[:16]
 def upload(base,token,path,payload):
     response=requests.post(f"{base.rstrip('/')}{path}",headers={'Authorization':f'Bearer {token}'},json=payload,timeout=120)
-    if not response.ok: raise RuntimeError(f'{path} upload failed {response.status_code}: {response.text[:400]}')
+    if not response.ok: raise RuntimeError(f'{path} upload failed: {json.dumps(response_diagnostic(response))}')
 def write(directory:Path,name:str,payload):directory.mkdir(parents=True,exist_ok=True);(directory/name).write_text(json.dumps(payload,indent=2,allow_nan=False)+'\n')
 
 def validate_publication(payloads):
@@ -260,7 +262,7 @@ def main()->int:
         config=json.loads(Path(args.config_file).read_text())
     else:
         if not base or not token: raise RuntimeError('APP_BASE_URL and DATA_INGEST_TOKEN are required')
-        response=requests.get(f"{base.rstrip('/')}/api/internal/pipeline/config",headers={'Authorization':f'Bearer {token}'},timeout=30);response.raise_for_status();config=response.json()
+        config=fetch_pipeline_config(base,token)
     leagues=config.get('leagues') or []
     if not leagues: raise RuntimeError('No connected football leagues')
     seasons=sorted({int(args.season or league['seasonYear']) for league in leagues});stats=load_player_stats_with_preseason_fallback(seasons);players=to_pandas(load_nflreadpy('load_players'));schedules=to_pandas(load_nflreadpy('load_schedules',seasons));output=Path(args.output_dir)

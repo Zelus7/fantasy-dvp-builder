@@ -103,13 +103,18 @@ The Cloudflare token should be narrowly scoped to this Worker and D1 database.
 
 ## Data refresh
 
-`.github/workflows/refresh-data.yml` runs after each NFL week and again Sunday morning. It fetches nflverse data in bulk, applies every connected league's scoring profile, and uploads:
+`.github/workflows/refresh-data.yml` runs every six hours (subject to GitHub scheduling delays). It fetches nflverse data in bulk, applies every connected league's scoring profile, and uploads:
 
 - Season, last-four, and last-six DvP.
 - Player performance and opportunity features.
 - Full NFL schedules for current-week, rest-of-season, and playoff analysis.
 
 Every upload is staged and validated. Empty or partial data cannot replace the last-known-good snapshot.
+
+Temporary configuration-fetch failures receive up to three bounded attempts;
+credential errors fail without retries. Safe request IDs connect pipeline errors
+to Worker logs. Uploads are not automatically replayed. See [operations](docs/operations.md)
+for recovery and diagnostic details.
 
 ## Decision weights
 
