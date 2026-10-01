@@ -58,6 +58,34 @@ download never implies that an unpublished NFL week is already available.
 
 ## Common failures
 
+### Configuration fetch failed during a dataset run
+
+The pipeline retries only its read-only configuration GET, at most three times.
+Temporary network failures, rate limits and selected 5xx responses use exponential
+backoff with jitter; `Retry-After` is honored up to 30 seconds. Each attempt has
+10-second connection and 30-second read timeouts. Authentication, credential
+decryption, TLS, malformed configuration and other non-transient errors stop
+without repeated attempts. Redirects are not followed with the ingestion token.
+Uploads and live verification are not automatically replayed: verification can
+record a decision snapshot, and an upload may have committed before a timeout.
+
+In **Build and publish datasets**, look for `pipeline_config_request`. Its
+`attempt`, `status`, `code`, `requestId`, `cfRay`, `stage` and `category` identify
+the available failure context. In Cloudflare Worker logs, search the matching
+`requestId` and `event=pipeline_config`. Stages distinguish listing leagues,
+loading the ESPN league bundle, and validating week/scoring settings. Categories
+distinguish storage, credentials, ESPN and application failures; they are not a
+claim that the underlying root cause has already been determined. Raw exception
+messages, SQL, URLs, cookies and response bodies are deliberately omitted.
+
+A successful retry keeps the workflow green. Exhaustion still fails the run and
+leaves notifications enabled; no data uploads have started at this stage. Stale
+ESPN fallback settings now stop generation rather than silently selecting an
+outdated fantasy week. Investigate persistent failures before manually rerunning.
+The September 30, 2026 06:57 EDT incident was an HTTP 500 at configuration fetch;
+the subsequent rerun and scheduled run succeeded. Its original root exception
+was not captured, so do not label that incident a confirmed database or ESPN bug.
+
 ### ESPN expired
 
 Symptom: `ESPN_AUTH_EXPIRED` or Settings shows `expired`.
