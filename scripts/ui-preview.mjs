@@ -10,20 +10,32 @@ import {withSecurityHeaders} from '../src/http.js';
 import {validateClaimPlan} from '../src/claim-plan.js';
 import {reviewOfferReport,reconcileClaimPlan} from '../src/claim-outcomes.js';
 import {readSnapshot} from '../src/snapshot-codec.js';
+import {waiverReviewCoverage} from '../src/waiver-review.js';
+const reviewFixture=process.env.FCC_PREVIEW_REVIEW==='1';
+const stamp=new Date().toISOString();
+const roleFeature=points=>({season:2026,generatedAt:stamp,dataThroughWeek:4,currentGames:4,seasonPpg:10,opportunity:{games:4,throughWeek:4,weeklyPoints:points.map((points,i)=>({week:i+1,points})),weeklyUsage:points.map((_,i)=>({week:i+1,team:'BUF',carries:11,targets:1}))}});
+const kickingFeature=attempts=>({season:2026,generatedAt:stamp,dataThroughWeek:4,opportunity:{contextOnly:true,kicking:{season:2026,team:'BUF',generatedAt:stamp,throughWeek:4,games:4,attempts:attempts.reduce((a,b)=>a+b,0),made:attempts.reduce((a,b)=>a+b,0),patMade:8,patAttempts:8,longMade:2,longAttempts:2,weekly:attempts.map((attempts,i)=>({week:i+1,attempts})),source:'Synthetic fixture'}}});
 const snapshotFile=process.env.FCC_PREVIEW_SNAPSHOT;
 const snapshotRow=snapshotFile?JSON.parse(await readFile(snapshotFile,'utf8'))[0].results[0]:null;
 const snapshot=snapshotRow?await readSnapshot(snapshotRow.inputs_json,snapshotRow.input_hash):null;
 const settings={riskWeights:{floor:.2,median:.6,ceiling:.2},adaptiveRisk:false,fantasyPlayoffWeeks:[15,16,17]};
 let preferences={protectedIds:[],watchlistIds:[]};
-const slots=snapshot?.settings.slots||{2:1,4:1,20:2};
+const slots=snapshot?.settings.slots||(reviewFixture?{0:1,2:1,4:1,17:1,20:3}:{2:1,4:1,20:2});
 const make=(id,name,position,value,extra={})=>({playerId:String(id),name,position,projectedPoints:value,seasonProjectedPoints:value*17,actualPoints:id===1?0:id===2?-2.2:null,eligibleSlotIds:[position==='RB'?2:4,23],proTeam:'BUF',injuryStatus:'ACTIVE',isStarter:id===1||id===3,lineupSlotId:position==='RB'?2:4,...extra});
 const context={riskWeights:settings.riskWeights,opponentLookup:{BUF:{opponent:'MIA',game:{kickoff:'2099-09-12T17:00:00Z',eventId:'fixture'}}},dvpLookup:{'WR:MIA':{percentile:80,rank:7,grade:'A',confidence:.4},'RB:MIA':{percentile:30,rank:22,grade:'D',confidence:.4}}};
 const mine=snapshot?.roster||analyzeRoster([make(1,'Fixture Lead Runner','RB',20),make(2,'Fixture Bench Runner','RB',15),make(3,'Fixture Receiver','WR',5),make(4,'Fixture Injured Receiver','WR',18,{injuryStatus:'OUT',percentOwned:99,isStarter:false,lineupSlotId:20,injuryEvidence:{earliestWeek:9,earlyWeek:9,planningWeek:10,lateWeek:12,reviewBy:'2099-01-01T00:00:00Z'}})],context);
 const theirs=analyzeRoster([make(11,'Fixture Lead Receiver','WR',20),make(12,'Fixture Bench Receiver','WR',15),make(13,'Fixture Other Runner','RB',5)],context);
 const agents=snapshot?.freeAgents||analyzeRoster([make(21,'Fixture Waiver Receiver','WR',12,{status:'FREEAGENT'}),make(22,'Fixture Waiver Runner','RB',8,{status:'WAIVERS'})],context);
-const planSettings=()=>snapshot?{...snapshot.settings,now:Date.now()}:({season:2026,rolePlayers:[...mine,...theirs,...agents],slots,rosterCapacity:4,currentWeek:5,endWeek:17,now:Date.now(),market:{type:'FAAB',budget:250,remaining:250,minimumBid:1,verifiedAt:new Date().toISOString()},schedules:Object.fromEntries([...mine,...theirs,...agents].map(p=>[p.playerId,{weeks:Array.from({length:17},(_,i)=>({week:i+1,bye:false,missingSchedule:false}))}]))});
+if(reviewFixture&&!snapshot){
+  mine.push(...analyzeRoster([make(31,'Fixture Hold Kicker','K',8.8,{eligibleSlotIds:[17],lineupSlotId:17,feature:kickingFeature([2,1,1,1])}),make(32,'Fixture Starting QB','QB',22,{eligibleSlotIds:[0],lineupSlotId:0}),make(33,'Fixture Spare QB','QB',18,{eligibleSlotIds:[0],lineupSlotId:20})],context));
+  agents.push(...analyzeRoster([make(34,'Fixture Opportunity Kicker','K',8.9,{eligibleSlotIds:[17],lineupSlotId:20,status:'WAIVERS',feature:kickingFeature([1,3,4,3])})],context));
+  mine.find(p=>p.playerId==='31').feature=kickingFeature([2,1,1,1]);agents.find(p=>p.playerId==='34').feature=kickingFeature([1,3,4,3]);
+  agents[0].feature=roleFeature([13,14,12,11]);agents[0].status='WAIVERS';
+  agents[1].feature=roleFeature([3.6,3.6,5.8,6.2]);agents[1].projectedPoints=10.1;agents[1].median=10.1;
+}
+const planSettings=()=>snapshot?{...snapshot.settings,now:Date.now()}:({season:2026,rolePlayers:[...mine,...theirs,...agents],slots,rosterCapacity:mine.length,currentWeek:5,endWeek:17,now:Date.now(),market:{type:'FAAB',budget:250,remaining:250,minimumBid:1,verifiedAt:new Date().toISOString()},schedules:Object.fromEntries([...mine,...theirs,...agents].map(p=>[p.playerId,{weeks:Array.from({length:17},(_,i)=>({week:i+1,bye:false,missingSchedule:false}))}]))});
 const teams=[{id:'9',name:'Synthetic Preview Team',roster:mine},{id:'2',name:'Synthetic Other Team',roster:theirs}];
-const league={leagueId:'fixture',teamId:'9',seasonYear:2026,leagueName:snapshot?'LOCAL SNAPSHOT — NOT A LIVE CONNECTION':'SYNTHETIC TEST DATA',currentWeek:snapshot?.settings.currentWeek||5,liveWeek:snapshot?.settings.currentWeek||5,lineupSlotCounts:slots,rosterSize:4,isDefault:true};
+const league={leagueId:'fixture',teamId:'9',seasonYear:2026,leagueName:snapshot?'LOCAL SNAPSHOT — NOT A LIVE CONNECTION':'SYNTHETIC TEST DATA',currentWeek:snapshot?.settings.currentWeek||5,liveWeek:snapshot?.settings.currentWeek||5,lineupSlotCounts:slots,rosterSize:mine.length,isDefault:true};
 const sources=()=>({espn:{status:'fresh',updatedAt:new Date().toISOString()},statistics:{status:'stale',updatedAt:'2026-01-01T00:00:00Z',throughWeek:0,coverage:'Synthetic fixture, not your live data'},news:{status:'missing',coverage:'Fixture has no news feed'}});
 const workspace=week=>({generatedAt:new Date().toISOString(),league:{...league,currentWeek:week||league.currentWeek},team:teams[0],opponent:teams[1],roster:mine,lineup:optimizeLineup(mine,slots,mine),matchups:bestAndToughestMatchups(mine),schedules:{},actions:[{type:'lineup',title:'Review your WR depth',detail:'Synthetic fixture action'}],contingencies:[],preferences,riskWeights:settings.riskWeights,freshness:sources(),adviceReady:true,news:[],summary:{injuryAlerts:1,dataWarnings:[snapshot?'PRIVATE LOCAL SNAPSHOT — not a live ESPN connection':'SYNTHETIC LOCAL PREVIEW — not live ESPN data']},changes:['Fixture roster change'],historical:false});
 const root=resolve('public');
@@ -41,6 +53,7 @@ const server=http.createServer(async(req,res)=>{
       const mode=url.searchParams.get('mode')||'week',position=url.searchParams.get('position');
       const filtered=agents.filter(p=>!position||p.position===position),options={mode,...planSettings(),...preferences};
       data={recommendations:recommendWaiverMoves(filtered,mine,options),trades:discoverTradePlans(teams,'9',options),emerging:emergingWaiverTargets(filtered,mine,options),tradeFreeAgents:agents,teams,holds:injuryHolds(mine,agents,options),watchlist:[...mine,...agents].filter(p=>preferences.watchlistIds.includes(p.playerId)),adviceReady:true,explanation:'Synthetic calculation fixture',emptyReason:'No fixture moves pass the filters',freshness:sources()};
+      data.reviewCoverage=waiverReviewCoverage(filtered,data.recommendations);
       if(url.searchParams.get('compute')==='browser')data.calculationInput={roster:mine,freeAgents:agents.filter(p=>!position||p.position===position),teams,yourTeamId:'9',settings:{mode,...planSettings(),...preferences},includeTrades:url.searchParams.get('trades')==='true',adviceReady:true,waiversReady:true};
     }else if(path==='/api/preferences'){preferences=body;data=preferences}
     else if(path==='/api/claim-plan'){

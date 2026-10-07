@@ -26,6 +26,6 @@ test('score rendering keeps missing, zero and negative values distinct',()=>{
 });
 test('waiver cards explain a named drop and distinguish a vacant slot',()=>{
   const p={name:'Add',playerId:'1',drop:{name:'Drop'},horizonEstimate:5,lineupGain:1,waiverValue:2};
-  assert.ok(waiverCard(p).includes('Drop Drop'));
+  assert.ok(waiverCard(p).includes('Compare with dropping Drop'));
   assert.ok(waiverCard({...p,drop:null}).includes('open roster slot'));
 });

@@ -1,7 +1,10 @@
 import {esc,number,signed,date,detail,empty,warnings,head} from './ui.js';
 
+// An unsupported review must not silently become a paid claim at the league minimum.
+export function recommendationDraftBid(player){return player.review?.spendingSupported&&player.faab?.available?player.faab.low:null;}
+
 export function planDetails(p){
-  return `${p.faab?.available?`<p><strong>Conservative value-policy range: $${p.faab.low}–$${p.faab.high}.</strong> $${p.faab.remaining} remains. Not a predicted winning price.</p>`:''}
+  return `${reviewDetails(p.review)}${p.faab?.available?`<p><strong>Conservative value-policy range: $${p.faab.low}–$${p.faab.high}.</strong> $${p.faab.remaining} remains. Not a predicted winning price.</p>`:''}
     <p>${esc(p.faabExplanation||'Budget not verified.')}</p>
     ${marketDetails(p.marketContext)}
     <p>${p.benchAlternative?`Already on your bench: <strong>${esc(p.benchAlternative.name)}</strong> (${number(p.benchAlternative.estimate)} this-week estimate).`:'No currently usable same-slot bench fallback was found.'}</p>
@@ -10,6 +13,16 @@ export function planDetails(p){
     ${p.fallbackClaims?.length?`<p>Alternatives if unavailable: ${p.fallbackClaims.map(a=>`${esc(a.name)}${a.bid?` (${esc(a.bid)})`:''}${a.drop?`; drop ${esc(a.drop)}`:''}`).join(' · ')}. Choose one path; these are not cumulative claims.</p>`:''}
     ${detail('Week-by-week keep versus add/drop',`<div class="table-scroll"><table><thead><tr><th>Week</th><th>Keep roster</th><th>After move</th><th>Gain</th></tr></thead><tbody>${(p.comparison||[]).map(w=>`<tr><td>${w.week}</td><td>${w.complete?number(w.before):'Unknown'}</td><td>${w.complete?number(w.after):'Unknown'}</td><td>${w.complete?signed(w.gain):'—'}</td></tr>`).join('')}</tbody></table></div><p>Comparison scenario: ${esc(p.comparisonScenario||'planning')}. Each column uses the best available starting lineup with those players. Unfilled future slots are explicitly flagged and scored as zero, not assumed to be covered. Bench players count only when they enter a future starting lineup. Assumes no other transactions and the stated injury-return scenario.</p>`)}
     ${(p.scenarioTotals||[]).length>1?`<p>Return timing stress tests: ${p.scenarioTotals.map(s=>`${esc(s.scenario)} ${signed(s.gain)}`).join(' · ')} starter points. Scenarios have no assigned probabilities.</p>`:''}`;
+}
+
+export function reviewDetails(r){
+  if(!r)return '<p>Structured evidence review unavailable for this historical model.</p>';
+  return `<section class="decision-review"><h4>${esc(r.label)}</h4><p>${esc(r.baseline)}</p><p><strong>Why now:</strong> ${esc(r.whyNow)}</p><p>${esc(r.scope)}</p><p>Evidence: ${esc(r.evidenceConfidence)}. Forecast confidence: ${esc(r.forecastConfidence)}.</p>${r.kicking?`<p>${esc(r.kicking.explanation)}</p>`:''}<h4>Case against the move</h4><ul>${r.counterarguments.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>${r.missing.length?`<h4>Missing or unverified</h4><ul>${r.missing.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>`:''}<p><strong>Spending:</strong> ${r.spendingSupported?'A conservative value-policy range may be shown after budget verification; this is not a winning-price prediction.':'No automated paid-bid range. Hold/watch or review a free/zero-bid option; roster-space cost still applies.'}</p>${detail('When to reconsider',`<ul>${r.reviewTriggers.map(s=>`<li>${esc(s)}</li>`).join('')}</ul><p>Review calculated ${esc(date(r.checkedAt))}; this is not the date every underlying source was updated.</p>`)}</section>`;
+}
+
+export function coverageReview(rows=[]){
+  if(!rows.length)return '';
+  return detail('Review coverage — what was actually checked',`<div class="table-scroll"><table><thead><tr><th>Position</th><th>Players loaded</th><th>Comparisons shown</th><th>Supported upgrades</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.position)}</td><td>${r.loaded}</td><td>${r.comparisons}</td><td>${r.supported}</td></tr>`).join('')}</tbody></table></div><p>Loaded does not mean individually researched. Legal pairs are screened, then at most 48 receive detailed scenario comparison with reserved coverage by position. Zero shown is not proof that no opportunity exists. Position filters narrow this review.</p><p>Close calls, watch candidates and insurance are not automatically recommended purchases. Keeping your roster is the comparison baseline.</p>`);
 }
 
 export function marketDetails(context){

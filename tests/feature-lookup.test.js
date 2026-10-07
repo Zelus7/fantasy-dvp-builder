@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {getPlayerFeatureLookup} from '../src/db.js';
+import {analyzePlayer} from '../src/analysis.js';
+
+test('context-only kicker storage never becomes a zero historical score or forecast',async()=>{
+  const opportunity={contextOnly:true,kicking:{games:4,attempts:11}};
+  const env={DB:{prepare(){return{bind(){return{async first(){return{datasetId:'fixture',throughWeek:4}},async all(){return{results:[{espnId:'1',position:'K',games:0,seasonPpg:0,last3Ppg:0,opportunityJson:JSON.stringify(opportunity)}]}}}}}}}};
+  const lookup=await getPlayerFeatureLookup(env,'1',2026,['1']);
+  assert.equal(lookup['1'].seasonPpg,null);assert.equal(lookup['1'].last3Ppg,null);assert.equal(lookup['1'].dataThroughWeek,4);
+  const p=analyzePlayer({playerId:'1',position:'K',proTeam:'IND',projectedPoints:null},{featureLookup:lookup,opponentLookup:{IND:{opponent:'PIT',game:{}}}});
+  assert.equal(p.hasEstimate,false);assert.equal(p.median,null);assert.deepEqual(p.feature.opportunity,opportunity);
+});
 
 test('league-wide feature lookup stays below the D1 parameter limit',async()=>{
   const sizes=[];
