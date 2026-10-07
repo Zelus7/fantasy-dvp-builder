@@ -58,7 +58,7 @@ test('missing future schedule is not interpreted as a bye or a valid season fore
 });
 test('bid policy respects verified minimum and budget without pretending market odds',()=>{
   const market={type:'FAAB',budget:250,remaining:3,minimumBid:1,verifiedAt:new Date().toISOString()};
-  const bid=bidGuidance({lineupGain:7,totalGain:20,position:'WR'},market);
+  const bid=bidGuidance({lineupGain:7,totalGain:20,position:'WR',review:{spendingSupported:true}},market);
   assert.equal(bid.max,3);assert.ok(bid.low>=1);assert.match(bid.explanation,/not your approved spending limit/);assert.equal(bid.winProbability,null);
   assert.equal(bidGuidance({}, {...market,remaining:0}).available,false);
   assert.equal(bidGuidance({}, {...market,verifiedAt:'bad'}).available,false);

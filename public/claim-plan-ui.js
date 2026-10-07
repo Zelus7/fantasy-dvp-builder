@@ -1,5 +1,6 @@
 import {esc,date,warnings} from './ui.js';
 import {claimPlanSummary} from './model/claim-plan.js';
+import {recommendationDraftBid} from './waiver-ui.js';
 
 const drafts=new Map();
 window.addEventListener('claim-outcomes-saved',event=>{const draft=drafts.get(event.detail?.key);if(draft?.data&&!draft.dirty&&!draft.busy)void load(draft,false);});
@@ -58,7 +59,7 @@ export async function queueRecommendation(player,options){
   if(draft.data.processedReport)throw new Error('This worksheet has processed results. Start a new worksheet first; your previous claims and report will stay in history.');
   if(draft.edit.claims.some(c=>c.addId===String(player.playerId)))throw new Error('That player is already in your plan.');
   if(draft.edit.claims.length>=12)throw new Error('The plan supports at most 12 claims.');
-  draft.edit.claims.push({addId:String(player.playerId),dropId:player.drop?String(player.drop.playerId):null,bid:player.faab?.low??draft.data.context.market.minimumBid??1,reportedPending:false});draft.dirty=true;render(draft);
+  draft.edit.claims.push({addId:String(player.playerId),dropId:player.drop?String(player.drop.playerId):null,bid:recommendationDraftBid(player),reportedPending:false});draft.dirty=true;render(draft);
 }
 function render(draft){
   const element=draft.element;if(!element?.isConnected)return;

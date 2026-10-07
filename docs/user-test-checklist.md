@@ -3,6 +3,9 @@
 Open https://fantasy-command-center.acarvall87.workers.dev/ on your phone.
 These checks do not require reinstalling or pairing the connector again.
 
+For the October 7 evidence-review release, start with the focused
+[waiver review checks](waiver-review-quality.md#verification-and-user-checks).
+
 - [ ] **Login and resume:** open the app, refresh it, switch away and return.
   You should stay signed in without a login loop. If ESPN later expires, its
   reconnect message must not log you out of the command center.

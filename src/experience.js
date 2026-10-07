@@ -4,6 +4,7 @@ import {analyzeRoster,optimizeLineup,bestAndToughestMatchups,buildScheduleOutloo
 import {byeCoverage,DECISION_METHOD} from './decisions.js';
 import {discoverTradePlans,evaluateTradePlan} from './trade-plan.js';
 import {emergingWaiverTargets} from './waiver-signals.js';
+import {waiverReviewCoverage} from './waiver-review.js';
 import {json,HttpError,readJson} from './http.js';
 import {buildWeatherLookup} from './weather.js';
 import {fetchNews} from './news.js';
@@ -67,6 +68,8 @@ async function context(env,state,players) {
   if(freshness.dvp.throughWeek!=null&&freshness.dvp.throughWeek<Math.max(0,Number(league.liveWeek||league.currentWeek)-1))freshness.dvp.status='stale';
   if(through!=null&&through<Math.max(0,Number(league.liveWeek||league.currentWeek)-1))freshness.statistics.status='stale';
   const forecastMeta=health.playerFeatures?.metadata?.forecast;
+  const kickingMeta=health.playerFeatures?.metadata?.kicking;
+  freshness.kicking={status:kickingMeta?.status==='available'?freshness.statistics.status:'missing',updatedAt:kickingMeta?.generatedAt||null,throughWeek:kickingMeta?.throughWeek??null,coverage:kickingMeta?.coverage||'Kicking opportunity has not been published. No independent kicker forecast or inferred zero-attempt games.'};
   freshness.forecast=sourceFreshness(health.playerFeatures?.generatedAt,36*3600,{status:forecastMeta?.status==='ready'&&forecastMeta.targetWeek===league.currentWeek?freshness.statistics.status:'missing',coverage:forecastMeta?.status==='ready'?`${forecastMeta.rows} forecasts for week ${forecastMeta.targetWeek}. ${forecastMeta.version}. Conditional on a recorded appearance; not a complete injury forecast.`:'No matching independent forecasts published; ESPN and historical fallback remain available.'});
   Object.assign(freshness,intelligenceCoverage(health.playerFeatures?.metadata?.intelligence,players,featureLookup,{season:league.seasonYear,week:league.currentWeek}));
   const weatherLookup=await buildWeatherLookup(games,{get:async(key,stale=false)=>(await cacheGet(env,key,stale))?.value||null,put:(key,value,ttl)=>cachePut(env,key,value,ttl)});
@@ -148,11 +151,11 @@ export async function buildOpportunities(env,opts={}) {
   const calculationInput={roster,freeAgents:agents,teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):[],yourTeamId:state.team.id,settings,position:opts.position,includeTrades:opts.includeTrades,adviceReady:ctx.adviceReady,waiversReady:ctx.adviceReady&&!free.cache?.stale};
   let snapshot=null,snapshotWarning=null;try{snapshot=await freezeDecision(env,state.bundle.league,calculationInput,ctx.freshness)}catch(error){snapshotWarning=error.code==='SNAPSHOT_STORAGE_BUDGET'?'The decision archive reached its storage safety limit. Existing history is preserved and current recommendations remain available, but this visit will not count toward model validation.':'This decision could not be archived; it will not count toward model validation.'}
   return {generatedAt:nowIso(),method:WAIVER_METHOD,snapshot,snapshotWarning,market:{...settings.market,teams:undefined},league:state.bundle.league,mode,recommendations,trades,holds:!opts.clientCompute&&calculationInput.waiversReady?injuryHolds(roster,agents,settings):[],adviceReady:calculationInput.waiversReady,freshness:{...ctx.freshness,waivers:sourceFreshness(free.cache?.updatedAt,300,{status:free.cache?.stale?'stale':'fresh',coverage:free.coverage})},
-    emerging,tradeFreeAgents:opts.includeTrades?agents.map(({playerId,name,position,status})=>({playerId,name,position,status})):undefined,
+    emerging,reviewCoverage:waiverReviewCoverage(agents,recommendations),tradeFreeAgents:opts.includeTrades?agents.map(({playerId,name,position,status})=>({playerId,name,position,status})):undefined,
     teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):undefined,
     calculationInput:opts.clientCompute?calculationInput:undefined,
     watchlist:analyzed.filter(p=>(state.preferences.watchlistIds||[]).includes(String(p.playerId))),
-    explanation:'Compare each move with keeping your roster and starting its best legal lineup. Future weeks use baseline scenarios, not calibrated forecasts. The best 48 screened add/drop pairs receive detailed multiweek comparisons. No bench-weight bonus is added.',
+    explanation:'Compare with holding and starting your best legal lineup. Up to 48 legal pairs receive detailed scenario review, with reserved coverage by position and material kicker near-ties. Evidence can change review status and spending eligibility, never silently add projected points. Future weeks are baseline scenarios, not calibrated forecasts.',
     emptyReason:!ctx.adviceReady?ctx.readinessReasons.join(' '):free.cache?.stale?'The waiver refresh failed; retry before acting.':'No moves passed the legal-lineup and value checks, or future schedule coverage is incomplete. Keeping your roster is a valid result.'};
 }
 

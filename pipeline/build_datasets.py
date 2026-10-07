@@ -21,10 +21,12 @@ try:
     from .opportunity import enrich_opportunity
     from .intelligence import load_intelligence, attach_intelligence
     from .transport import fetch_pipeline_config, response_diagnostic
+    from .kicking import kicking_features
 except ImportError:
     from opportunity import enrich_opportunity
     from intelligence import load_intelligence, attach_intelligence
     from transport import fetch_pipeline_config, response_diagnostic
+    from kicking import kicking_features
 
 TEAMS={"ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND","JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA","SF","TB","TEN","WSH"}
 ALIASES={"ARZ":"ARI","BLT":"BAL","CLV":"CLE","HST":"HOU","JAC":"JAX","LA":"LAR","OAK":"LV","SD":"LAC","STL":"LAR","WAS":"WSH"}
@@ -290,6 +292,10 @@ def main()->int:
         forecast_status=enrich_forecasts(features,stats,items,season,
                                         min(18,int(args.through_week or league.get('currentWeek') or 1)))
         metadata['forecast']=forecast_status
+        kickers, kicking_coverage = kicking_features(optional['pbp'], players, current,
+            schedule_payloads[season]['rows'], season, actual, metadata['generatedAt'])
+        features.extend(kickers)
+        metadata['kicking'] = kicking_coverage
         target_week=min(18,int(args.through_week or league.get('currentWeek') or 1))
         intelligence_key=(season,target_week)
         if intelligence_key not in intelligence_cache:

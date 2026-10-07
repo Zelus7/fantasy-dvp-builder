@@ -1,6 +1,7 @@
 import { DEFAULT_RISK_WEIGHTS } from './constants.js';
 import { decryptJson, encryptJson } from './security.js';
 import {validateForecast} from './forecast.js';
+import {validateKicking} from './waiver-review.js';
 
 import {normalizeWeights} from './weights.js';
 export {normalizeWeights};
@@ -31,13 +32,13 @@ export async function replacePlayerFeatures(env,payload){
   if(!leagueId||!Number.isInteger(season)||!Number.isInteger(week))throw new Error('Invalid player feature metadata');
   // Validate the entire forecast batch before staging; a bad model publication
   // cannot replace the currently active dataset.
-  for(const row of rows)validateForecast(row.forecast,m);
+  for(const row of rows){validateForecast(row.forecast,m);if(String(row.position).toUpperCase()==='K'){const k=validateKicking(row.opportunity?.kicking,m);if(k.team!==row.team)throw new Error('Kicking team mismatch');}}
   const scope=`${leagueId}:${season}`,{datasetId,generatedAt}=await stage(env,'player_features',scope,m);
   try{
     const seen=new Set();
     const statements=rows.map(row=>{
       const espn=String(row.espnId||''),pos=String(row.position||'').toUpperCase();
-      if(!espn||seen.has(espn)||!['QB','RB','WR','TE'].includes(pos))throw new Error(`Invalid player feature ${espn}`);
+      if(!espn||seen.has(espn)||!['QB','RB','WR','TE','K'].includes(pos)||pos==='K'&&(!row.opportunity?.contextOnly||!row.opportunity?.kicking))throw new Error(`Invalid player feature ${espn}`);
       seen.add(espn);
       return env.DB.prepare(`INSERT INTO player_features (dataset_id,league_id,espn_id,gsis_id,player_name,position,team,season,games,current_games,prior_games,prior_season,prior_weight,season_ppg,last3_ppg,last5_ppg,standard_deviation,targets_per_game,carries_per_game,touches_per_game,target_share,generated_at,opportunity_json,forecast_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .bind(datasetId,leagueId,espn,row.gsisId||null,row.playerName,pos,row.team||null,season,Number(row.games||0),Number(row.currentGames??row.games??0),Number(row.priorGames||0),row.priorSeason==null?null:Number(row.priorSeason),Number(row.priorWeight||0),Number(row.seasonPpg||0),Number(row.last3Ppg||0),Number(row.last5Ppg||0),Number(row.standardDeviation||0),Number(row.targetsPerGame||0),Number(row.carriesPerGame||0),Number(row.touchesPerGame||0),row.targetShare==null?null:Number(row.targetShare),generatedAt,row.opportunity?JSON.stringify(row.opportunity):null,row.forecast?JSON.stringify(row.forecast):null);
@@ -59,7 +60,11 @@ export async function getPlayerFeatureLookup(env,leagueId,season,ids=[]){
   for(let i=0;i<unique.length;i+=90){
     const batch=unique.slice(i,i+90),placeholders=batch.map(()=>'?').join(',');
     const rows=await env.DB.prepare(`SELECT espn_id AS espnId,gsis_id AS gsisId,player_name AS playerName,position,team,season,games,current_games AS currentGames,prior_games AS priorGames,prior_season AS priorSeason,prior_weight AS priorWeight,season_ppg AS seasonPpg,last3_ppg AS last3Ppg,last5_ppg AS last5Ppg,standard_deviation AS standardDeviation,targets_per_game AS targetsPerGame,carries_per_game AS carriesPerGame,touches_per_game AS touchesPerGame,target_share AS targetShare,opportunity_json AS opportunityJson,forecast_json AS forecastJson,generated_at AS generatedAt FROM player_features WHERE dataset_id=? AND espn_id IN (${placeholders})`).bind(snap.datasetId,...batch).all();
-    for(const row of rows.results||[]){const {opportunityJson,forecastJson,...fields}=row;let forecast=null;try{forecast=forecastJson?validateForecast(JSON.parse(forecastJson)):null;}catch{/* Old or invalid forecast data is unavailable, never a zero. */}result[String(row.espnId)]={...fields,opportunity:opportunityJson?JSON.parse(opportunityJson):null,forecast};}
+    for(const row of rows.results||[]){const {opportunityJson,forecastJson,...fields}=row;let forecast=null;try{forecast=forecastJson?validateForecast(JSON.parse(forecastJson)):null;}catch{/* Old or invalid forecast data is unavailable, never a zero. */}
+      // Kicking rows carry opportunity only. Never expose legacy non-null DB
+      // placeholders as scored history or let them create a zero-point fallback.
+      if(fields.position==='K')Object.assign(fields,{games:0,currentGames:0,priorGames:0,priorWeight:0,seasonPpg:null,last3Ppg:null,last5Ppg:null,standardDeviation:null,targetsPerGame:null,carriesPerGame:null,touchesPerGame:null});
+      result[String(row.espnId)]={...fields,dataThroughWeek:snap.throughWeek,opportunity:opportunityJson?JSON.parse(opportunityJson):null,forecast};}
   }
   return result;
 }
