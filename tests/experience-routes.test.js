@@ -16,7 +16,7 @@ test('preferences, visit history and advice gates use the real schema behind aut
   const league={leagueId:'1',seasonYear:2026,teamId:'9',leagueName:'Fixture',teamName:'My fixture team',currentWeek:1,liveWeek:1,lineupSlotCounts:{4:1,20:2},rosterSize:3};
   await saveLeagues(env,[league]);
   const roster=[{playerId:'10',name:'Fixture receiver',position:'WR',proTeam:'BUF',projectedPoints:10,seasonProjectedPoints:170,actualPoints:0,eligibleSlotIds:[4,23],isStarter:true,lineupSlotId:4,injuryStatus:'ACTIVE'}];
-  const bundle={league,teams:[{id:'9',name:'My fixture team',roster}],schedule:[]};
+  const bundle={league,teams:[{id:'9',name:'My fixture team',roster},{id:'2',name:'Other fixture team',roster:[{...roster[0],playerId:'20',name:'Other receiver'}]}],schedule:[]};
   await cachePut(env,'espn:v2:league:1:2026:current',bundle,180);
   await cachePut(env,'nfl:news',{generatedAt:new Date().toISOString(),items:[]},180);
   await replaceScheduleDataset(env,{metadata:{season:2026,throughWeek:1,generatedAt:new Date().toISOString()},rows:[{eventId:'fixture',week:1,homeTeam:'BUF',awayTeam:'MIA',kickoff:'2099-09-01T17:00:00Z'}]});
@@ -35,6 +35,14 @@ test('preferences, visit history and advice gates use the real schema behind aut
   assert.equal((await request('/api/workspace?week=99')).status,400);
   assert.equal((await request('/api/workspace?leagueId=other')).status,409);
   assert.equal((await request('/api/preferences',null)).status,400);
+  const trade=body=>worker.fetch(new Request('https://fixture.example/api/trade-review',{method:'POST',headers,body:JSON.stringify(body)}),env);
+  assert.equal((await trade({otherTeamId:'9'})).status,400);
+  assert.equal((await trade({otherTeamId:'2',mode:'invalid'})).status,400);
+  assert.match((await (await trade({otherTeamId:'2',giveIds:['10'],receiveIds:['20']})).json()).reason,/protected/);
+  await request('/api/preferences',{protectedIds:[],watchlistIds:[]});
+  const evaluated=await (await trade({otherTeamId:'2',giveIds:['10'],receiveIds:['20'],mode:'week'})).json();
+  assert.equal(evaluated.method,'calendar-roster-fit-v1');assert.equal(evaluated.window.count,1);assert.equal(evaluated.viable,false);
+  assert.equal((await request('/api/decision-history?snapshotWeek=99')).status,400);
   const snapshot=await freezeDecision(env,league,{waiversReady:true,roster,freeAgents:[{playerId:'11',name:'Candidate',evidence:'Synthetic evidence '.repeat(200)}],settings:{currentWeek:1,mode:'week',now:Date.now()}},{});
   const stored=db.prepare('SELECT inputs_json FROM decision_snapshots WHERE id=?').get(snapshot.id).inputs_json;
   assert.ok(stored.startsWith(SNAPSHOT_PREFIX));

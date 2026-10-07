@@ -36,3 +36,21 @@ export async function decisionHistory(env,league){
     .bind(String(league.leagueId),league.seasonYear).all();
   return (rows.results||[]).map(({outcomeJson,feedbackJson,...r})=>({...r,outcome:outcomeJson?JSON.parse(outcomeJson):null,feedback:feedbackJson?JSON.parse(feedbackJson):null}));
 }
+
+export async function decisionHistoryPage(env,league,{week=null,cursor=null,liveWeek=1,limit=6}={}){
+  const scope=[String(league.leagueId),league.seasonYear];
+  const weeks=(await env.DB.prepare('SELECT week,COUNT(*) AS count FROM decision_snapshots WHERE league_id=? AND season=? GROUP BY week ORDER BY week DESC').bind(...scope).all()).results||[];
+  const selected=week==null?(weeks.find(w=>w.week<liveWeek)?.week??weeks[0]?.week??null):Number(week);
+  if(selected!=null&&(!Number.isInteger(selected)||selected<1||selected>18))throw new Error('Invalid archive week.');
+  let after=null;
+  if(cursor){
+    if(typeof cursor!=='string'||cursor.length>2048)throw new Error('Invalid archive cursor.');
+    try{after=JSON.parse(atob(cursor));}catch{throw new Error('Invalid archive cursor.');}
+    if(!after||typeof after.at!=='string'||typeof after.id!=='string'||after.at.length>40||after.id.length>100||after.week!==selected)throw new Error('Invalid archive cursor.');
+  }
+  const size=Math.min(20,Math.max(1,Math.floor(Number(limit)||6)));
+  const result=selected==null?[]:(await env.DB.prepare(`SELECT id,week,mode,method,created_at AS createdAt,result_json AS feedbackJson FROM decision_snapshots WHERE league_id=? AND season=? AND week=?${after?' AND (created_at<? OR (created_at=? AND id<?))':''} ORDER BY created_at DESC,id DESC LIMIT ?`).bind(...scope,selected,...(after?[after.at,after.at,after.id]:[]),size+1).all()).results||[];
+  const entries=result.slice(0,size).map(({feedbackJson,...r})=>({...r,feedback:feedbackJson?JSON.parse(feedbackJson):null})),last=entries.at(-1);
+  return {weeks,selectedWeek:selected,entries,nextCursor:result.length>size?btoa(JSON.stringify({at:last.createdAt,id:last.id,week:selected})):null,
+    explanation:'Choose a week and inspect the exact frozen decision time. Repeated snapshots are not independent trials; no aggregate superiority claim is made.'};
+}

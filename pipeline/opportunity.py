@@ -37,6 +37,7 @@ def enrich_opportunity(features, current, players, snaps, pbp, depth, through):
         if same_season(row) and 1 <= number(row.get('week')) <= through and str(row.get('game_type', 'REG')) == 'REG':
             snap_by_id[str(row.get('pfr_player_id'))].append(row)
     redzone = defaultdict(int)
+    inside_ten = defaultdict(int)
     pbp_teams = set()
     for row in pbp.to_dict('records'):
         week = int(number(row.get('week')))
@@ -47,8 +48,12 @@ def enrich_opportunity(features, current, players, snaps, pbp, depth, through):
             continue
         if number(row.get('rush_attempt')) and not number(row.get('qb_kneel')):
             redzone[(str(row.get('rusher_player_id')), week)] += 1
+            if number(row.get('yardline_100'), 101) <= 10:
+                inside_ten[(str(row.get('rusher_player_id')), week)] += 1
         if number(row.get('pass_attempt')) and row.get('receiver_player_id'):
             redzone[(str(row.get('receiver_player_id')), week)] += 1
+            if number(row.get('yardline_100'), 101) <= 10:
+                inside_ten[(str(row.get('receiver_player_id')), week)] += 1
     depth_by_id = {}
     for row in sorted(depth.to_dict('records'), key=lambda r: str(r.get('dt') or r.get('timestamp') or '')):
         if not same_season(row):
@@ -94,6 +99,10 @@ def enrich_opportunity(features, current, players, snaps, pbp, depth, through):
              'targets': number(r.get('targets'), None), 'carries': number(r.get('carries'), None),
              'receptions': number(r.get('receptions'), None),
              'receivingAirYards': number(r.get('receiving_air_yards'), None),
+             'redZoneOpportunities': redzone[(gsis, int(number(r.get('week'))))]
+                 if (r.get('recent_team') or r.get('team'), int(number(r.get('week')))) in pbp_teams else None,
+             'insideTenOpportunities': inside_ten[(gsis, int(number(r.get('week'))))]
+                 if (r.get('recent_team') or r.get('team'), int(number(r.get('week')))) in pbp_teams else None,
              'snapShare': next((share(s.get('offense_pct')) for s in snap_rows
                                 if number(s.get('week')) == number(r.get('week'))), None)}
             for r in rows[-5:]]

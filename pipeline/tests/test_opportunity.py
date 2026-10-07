@@ -19,6 +19,8 @@ class OpportunityTests(unittest.TestCase):
         self.assertEqual(row['carryShare'], .1)
         self.assertIsNone(row['snapShare'])
         self.assertIsNone(row['redZoneOpportunities'])
+        self.assertIsNone(row['weeklyUsage'][0]['redZoneOpportunities'])
+        self.assertIsNone(row['weeklyUsage'][0]['insideTenOpportunities'])
         self.assertIsNone(row['targetTrend'])
         self.assertTrue(row['touchdownDependent'])
         self.assertEqual(row['weeklyPoints'][0]['points'], 8.5)
@@ -30,6 +32,18 @@ class OpportunityTests(unittest.TestCase):
         ])['opportunity']
         self.assertEqual(row['snapShare'], .6)
         self.assertEqual(row['redZoneOpportunities'], 1)
+        self.assertEqual(row['weeklyUsage'][0]['redZoneOpportunities'], 1)
+        self.assertEqual(row['weeklyUsage'][0]['insideTenOpportunities'], 0)
+
+    def test_weekly_scoring_opportunities_exclude_future_no_plays_and_kneels(self):
+        row = self.fixture(pbp=[
+            {'posteam':'BUF','week':1,'yardline_100':9,'rusher_player_id':'p1','rush_attempt':1},
+            {'posteam':'BUF','week':1,'yardline_100':5,'rusher_player_id':'p1','rush_attempt':1,'qb_kneel':1},
+            {'posteam':'BUF','week':1,'yardline_100':3,'receiver_player_id':'p1','pass_attempt':1,'no_play':1},
+            {'posteam':'BUF','week':2,'yardline_100':3,'receiver_player_id':'p1','pass_attempt':1},
+        ])['opportunity']['weeklyUsage'][0]
+        self.assertEqual(row['redZoneOpportunities'], 1)
+        self.assertEqual(row['insideTenOpportunities'], 1)
 
     def test_prior_only_player_has_no_current_season_opportunity(self):
         row = enrich_opportunity([{'gsisId': 'absent'}], pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), 1)[0]

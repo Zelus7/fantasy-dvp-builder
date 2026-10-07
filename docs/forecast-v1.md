@@ -13,6 +13,8 @@ Two targets are deliberately distinct:
 
 Current injuries, late-breaking news, depth charts, snaps and red-zone evidence remain important context. They are not all fitted inputs in this version, and the model does not predict medical recovery or inactive status. New players with fewer than three historical stat lines do not get invented estimates. Changed teams, stale/wrong-week data, and long usage gaps prevent model promotion for the player.
 
+The October 6 role-research queue uses auditable observed-workload and teammate-absence triggers without changing these coefficients or promotion gates. It compares the latest completed game's targets/carries/snaps with at least two strictly earlier same-team observations; stale or wrong-season usage cannot establish a role increase. Same-position injuries prompt investigation, never an assumed transfer of touches. Weekly inside-20/inside-10 evidence remains unknown when play-by-play coverage is absent. These policies have software regression coverage, not measured breakout precision or a demonstrated edge over ESPN.
+
 ## Reproducible historical protocol
 
 `python -m pipeline.train_forecast --config-file <private league-scoring config>`
