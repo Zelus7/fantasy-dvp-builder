@@ -1,14 +1,16 @@
 import {cacheGet,cachePut,getSettings,listLeagues,getDvpLookup,getNflSchedule,getPlayerFeatureLookup,getDataHealth,setSetting} from './db.js';
 import {fetchLeagueBundle,fetchWaiverPool,fetchNflWeekSchedule,buildOpponentLookup,selectedTeam,selectedOpponent,allLeaguePlayers,fetchHistoricalPlayerScores,fetchWinningBids,fetchWaiverActivity} from './espn.js';
 import {analyzeRoster,optimizeLineup,bestAndToughestMatchups,buildScheduleOutlook,eligibleForSlot,adjustRiskWeights} from './analysis.js';
-import {recommendWaiverMoves,discoverTradeTargets,evaluateBilateralTrade,byeCoverage,DECISION_METHOD} from './decisions.js';
+import {byeCoverage,DECISION_METHOD} from './decisions.js';
+import {discoverTradePlans,evaluateTradePlan} from './trade-plan.js';
+import {emergingWaiverTargets} from './waiver-signals.js';
 import {json,HttpError,readJson} from './http.js';
 import {buildWeatherLookup} from './weather.js';
 import {fetchNews} from './news.js';
 import {STARTER_SLOT_IDS} from './constants.js';
 import {planWaivers,injuryHolds,WAIVER_METHOD} from './waiver-plan.js';
 import {attachInjuryEvidence,validateInjuryEvidence} from './injury-evidence.js';
-import {freezeDecision,decisionHistory} from './decision-store.js';
+import {freezeDecision,decisionHistoryPage} from './decision-store.js';
 import {readSnapshot} from './snapshot-codec.js';
 import {validateClaimPlan} from './claim-plan.js';
 import {readClaimPlan,saveClaimPlan} from './claim-plan-store.js';
@@ -136,13 +138,17 @@ export async function buildOpportunities(env,opts={}) {
   const pool=[...allLeaguePlayers(state.bundle),...free.players],ctx=await context(env,state,pool),analyzed=analyzeRoster(pool,ctx),byId=new Map(analyzed.map(p=>[String(p.playerId),p]));
   const roster=state.team.roster.map(p=>byId.get(String(p.playerId))),agents=free.players.map(p=>byId.get(String(p.playerId))),schedules=await outlook(env,state,pool,ctx);
   const settings={mode,slots:state.bundle.league.lineupSlotCounts,schedules,protectedIds:state.preferences.protectedIds||[],rosterCapacity:state.bundle.league.rosterSize,limit:24,currentWeek:state.bundle.league.currentWeek,endWeek:Math.min(18,Math.max(...(state.settings.fantasyPlayoffWeeks||[15,16,17]))),now:Date.now(),market:{...state.bundle.league.acquisition,...state.team.acquisition,verifiedAt:state.bundle.cache?.stale?null:state.bundle.cache?.updatedAt}};
+  settings.season=state.league.seasonYear;
+  settings.rolePlayers=analyzed.map(({playerId,name,position,team,proTeam,injuryStatus,percentOwned,feature})=>({playerId,name,position,team,proTeam,injuryStatus,percentOwned,feature:{opportunity:feature?.opportunity?{depthPosition:feature.opportunity.depthPosition,carryShare:feature.opportunity.carryShare,targetShare:feature.opportunity.targetShare}:null}}));
   const teams=state.bundle.teams.map(team=>({...team,roster:team.roster.map(p=>byId.get(String(p.playerId)))}));
   const market=await fetchWinningBids(env,state.bundle.league,pool,{force:opts.force});Object.assign(settings.market,market,{yourTeamId:state.team.id,slots:settings.slots,teams:teams.map(({id,name,roster,acquisition})=>({id,name,roster,acquisition}))});
   const recommendations=!opts.clientCompute&&ctx.adviceReady&&!free.cache?.stale?planWaivers(agents,roster,settings):[];
-  const trades=!opts.clientCompute&&opts.includeTrades&&ctx.adviceReady?discoverTradeTargets(teams,state.team.id,settings):[];
+  const trades=!opts.clientCompute&&opts.includeTrades&&ctx.adviceReady?discoverTradePlans(teams,state.team.id,settings):[];
+  const emerging=!opts.clientCompute&&ctx.adviceReady&&!free.cache?.stale?emergingWaiverTargets(agents,roster,settings):[];
   const calculationInput={roster,freeAgents:agents,teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):[],yourTeamId:state.team.id,settings,position:opts.position,includeTrades:opts.includeTrades,adviceReady:ctx.adviceReady,waiversReady:ctx.adviceReady&&!free.cache?.stale};
   let snapshot=null,snapshotWarning=null;try{snapshot=await freezeDecision(env,state.bundle.league,calculationInput,ctx.freshness)}catch(error){snapshotWarning=error.code==='SNAPSHOT_STORAGE_BUDGET'?'The decision archive reached its storage safety limit. Existing history is preserved and current recommendations remain available, but this visit will not count toward model validation.':'This decision could not be archived; it will not count toward model validation.'}
   return {generatedAt:nowIso(),method:WAIVER_METHOD,snapshot,snapshotWarning,market:{...settings.market,teams:undefined},league:state.bundle.league,mode,recommendations,trades,holds:!opts.clientCompute&&calculationInput.waiversReady?injuryHolds(roster,agents,settings):[],adviceReady:calculationInput.waiversReady,freshness:{...ctx.freshness,waivers:sourceFreshness(free.cache?.updatedAt,300,{status:free.cache?.stale?'stale':'fresh',coverage:free.coverage})},
+    emerging,tradeFreeAgents:opts.includeTrades?agents.map(({playerId,name,position,status})=>({playerId,name,position,status})):undefined,
     teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):undefined,
     calculationInput:opts.clientCompute?calculationInput:undefined,
     watchlist:analyzed.filter(p=>(state.preferences.watchlistIds||[]).includes(String(p.playerId))),
@@ -207,7 +213,11 @@ export async function handleExperience(request,env) {
     const feedback={status:body.status,playerId:body.playerId||null,cost:body.status==='acquired'?cost:null,at:nowIso(),source:'User reported; not independently verified in ESPN'};
     await env.DB.prepare('UPDATE decision_snapshots SET result_json=? WHERE id=?').bind(JSON.stringify(feedback),String(body.id)).run();return json({saved:true});
   }
-  if(path==='/api/decision-history'&&request.method==='GET'){const state=await resolve(env,opts);return json({entries:await decisionHistory(env,state.league)});}
+  if(path==='/api/decision-history'&&request.method==='GET'){
+    const state=await resolve(env,opts);
+    try{return json(await decisionHistoryPage(env,state.league,{week:url.searchParams.get('snapshotWeek'),cursor:url.searchParams.get('cursor'),liveWeek:state.bundle.league.liveWeek}));}
+    catch(error){if(error.message.startsWith('Invalid archive'))throw new HttpError(400,'INVALID_ARCHIVE_FILTER',error.message);throw error;}
+  }
   if(path==='/api/decision-replay'&&request.method==='GET'){
     const state=await resolve(env,opts),row=await env.DB.prepare('SELECT method,inputs_json AS inputsJson,input_hash AS inputHash,week FROM decision_snapshots WHERE id=? AND league_id=? AND season=?').bind(url.searchParams.get('id')||'',String(state.league.leagueId),state.league.seasonYear).first();
     if(!row)throw new HttpError(404,'SNAPSHOT_NOT_FOUND','Decision snapshot not found.');
@@ -236,11 +246,19 @@ export async function handleExperience(request,env) {
   if(path==='/api/history'&&request.method==='GET'){const state=await resolve(env,opts);return json({entries:(await cacheGet(env,`history:${state.league.leagueId}:${state.league.seasonYear}`,true))?.value||[]});}
   if(path==='/api/preferences'&&request.method==='PUT'){const body=await requestObject(request),state=await resolve(env,opts),value={protectedIds:uniqueIds(body.protectedIds),watchlistIds:uniqueIds(body.watchlistIds)};await setSetting(env,preferenceKey(state.league),value);return json(value);}
   if(path==='/api/trade-review'&&request.method==='POST'){
-    const body=await requestObject(request),state=await resolve(env,opts),pool=allLeaguePlayers(state.bundle),ctx=await context(env,state,pool),players=analyzeRoster(pool,ctx),byId=new Map(players.map(p=>[String(p.playerId),p]));
+    const body=await requestObject(request),state=await resolve(env,opts);
     const theirs=state.bundle.teams.find(t=>String(t.id)===String(body.otherTeamId)&&String(t.id)!==String(state.team.id));
     if(!theirs)throw new HttpError(400,'TRADE_TEAM_REQUIRED','Choose another league team.');
+    if(!['week','bridge','ros'].includes(body.mode||'bridge'))throw new HttpError(400,'INVALID_HORIZON','Choose a supported trade horizon.');
+    const needsFree=body.yourAddIds?.length||body.theirAddIds?.length;
+    const free=needsFree?await fetchWaiverPool(env,state.league,null,{force:opts.force,week:state.bundle.league.currentWeek}):{players:[]};
+    const pool=[...allLeaguePlayers(state.bundle),...free.players],ctx=await context(env,state,pool),players=analyzeRoster(pool,ctx),byId=new Map(players.map(p=>[String(p.playerId),p]));
     if(!ctx.adviceReady)throw new HttpError(409,'DATA_NOT_READY','Refresh ESPN and schedule data before evaluating a trade.');
-    return json(evaluateBilateralTrade(state.team.roster.map(p=>byId.get(String(p.playerId))),theirs.roster.map(p=>byId.get(String(p.playerId))),body.giveIds||[],body.receiveIds||[],{slots:state.bundle.league.lineupSlotCounts,schedules:await outlook(env,state,pool,ctx),protectedIds:state.preferences.protectedIds||[]}));
+    if(free.cache?.stale&&(body.yourAddIds?.length||body.theirAddIds?.length))throw new HttpError(409,'DATA_NOT_READY','Refresh free-agent availability before evaluating an extra acquisition.');
+    return json(evaluateTradePlan(state.team.roster.map(p=>byId.get(String(p.playerId))),theirs.roster.map(p=>byId.get(String(p.playerId))),body.giveIds||[],body.receiveIds||[],{
+      mode:body.mode||'bridge',currentWeek:state.bundle.league.currentWeek,effectiveWeek:body.effectiveWeek==null?state.bundle.league.currentWeek:Number(body.effectiveWeek),endWeek:Math.min(18,Math.max(...(state.settings.fantasyPlayoffWeeks||[15,16,17]))),now:Date.now(),
+      slots:state.bundle.league.lineupSlotCounts,rosterCapacity:state.bundle.league.rosterSize,schedules:await outlook(env,state,pool,ctx),protectedIds:state.preferences.protectedIds||[],
+      freeAgents:free.players.map(p=>byId.get(String(p.playerId))),yourDropIds:body.yourDropIds,theirDropIds:body.theirDropIds,yourAddIds:body.yourAddIds,theirAddIds:body.theirAddIds}));
   }
   throw new HttpError(405,'METHOD_NOT_ALLOWED','This action is not supported.');
 }
