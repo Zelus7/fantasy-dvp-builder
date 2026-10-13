@@ -1,4 +1,4 @@
-import {esc,number,detail,metric,warnings} from './ui.js';
+import {esc,number,signed,date,detail,metric,warnings} from './ui.js';
 import {intelligenceEvidence} from './intelligence-ui.js';
 
 export function forecastEvidence(p){
@@ -31,6 +31,18 @@ export function forecastResearch(players=[],position=''){
 }
 
 export function forecastAudit(a){
-  if(!a?.count)return '<p>Independent forecast comparison awaits matched pre-kickoff predictions and final scores.</p>';
-  return `<p><strong>Independent forecast vs ESPN:</strong> ${a.count} matched players. Mean absolute error ${number(a.modelMae)} vs ${number(a.espnMae)} points (lower is better). ${esc(a.caveat)} Each snapshot is a separate trial; repeated snapshots must not be added as independent samples.</p>`;
+  const c=a?.coverage;
+  const coverage=c?`<p>Audit coverage: ${c.uniquePlayers} unique players; ${c.matched} matched. Exclusions (each player counted once): ${c.noUsableForecast} without a usable independent forecast, ${c.notPreKickoff} not demonstrably frozen before kickoff, ${c.missingActual} missing actuals, ${c.missingEspn} missing ESPN projections. Neither missing nor excluded means zero points.</p>`:'';
+  if(!a?.count)return '<p>Independent forecast comparison awaits matched pre-kickoff predictions and final scores.</p>'+coverage;
+  return `<p><strong>Independent forecast vs ESPN:</strong> ${a.count} matched players. Mean absolute error ${number(a.modelMae)} vs ${number(a.espnMae)} points (lower is better). ${esc(a.caveat)} Repeated snapshots are not independent samples.</p>${coverage}${detail('Player-level prediction errors',`<p>Largest absolute independent-model errors first. Signed error = prediction minus actual: positive means overprediction. Same players and decision time for both models.</p><p class="fine">On a phone, swipe the table sideways to see every score and error.</p><div class="table-scroll" tabindex="0" aria-label="Player prediction errors, horizontally scrollable"><table class="forecast-error-table"><thead><tr><th>Player</th><th>Independent</th><th>ESPN</th><th>Actual</th><th>Model error</th><th>ESPN error</th></tr></thead><tbody>${(a.rows||[]).map(r=>`<tr><td>${esc(r.name)} · ${esc(r.position)}</td><td>${number(r.prediction)}</td><td>${number(r.espn)}</td><td>${number(r.actual)}</td><td>${signed(r.error)}</td><td>${signed(r.espnError)}</td></tr>`).join('')}</tbody></table></div>${a.missing?.length?`<h4>Unmatched players</h4><ul>${a.missing.map(p=>`<li>${esc(p.name)}: ${esc(p.reason)}</li>`).join('')}</ul>`:''}`)}`;
+}
+
+export function decisionAuditPanel(a,coverage){
+  if(!a)return '<p>Detailed lineup audit unavailable for this archived calculation.</p>';
+  const m=a.metrics;
+  return `<h4>Separate decision results</h4><p>Inputs frozen ${esc(date(a.timing.frozenAt))}; first loaded kickoff ${esc(date(a.timing.firstKickoff))}. ${a.timing.prospective?'Clean pre-week snapshot.':'Not a clean pre-week snapshot; individual forecasts still require a pre-kickoff timestamp.'}</p>
+    <div class="metric-grid">${metric('Start / sit gain',signed(m.startSitGain))}${metric('Waiver net starter gain',signed(m.waiverNetGain))}${metric('Points / FAAB dollar',number(m.faabPointsPerDollar))}</div><p>${esc(a.explanation)}</p><p>${esc(m.acquisitionStatus)}. Unknown metrics stay blank; a free acquisition does not create infinite efficiency.</p>
+    ${detail('Exact frozen lineups and missing scores',Object.entries(a.lineups).filter(([,v])=>v).map(([key,l])=>`<h4>${esc(({kept:'Keep roster — suggested starters',proposed:'Proposed add/drop starters',espn:'ESPN-only baseline starters',asSet:'Lineup as set at freeze time'})[key])}</h4><p>${l.matched}/${l.expected} actuals matched; total ${number(l.points)}.${l.missing.length?` Missing: ${l.missing.map(p=>esc(p.name)).join(', ')}.`:''}</p><div class="table-scroll"><table><thead><tr><th>Player</th><th>Frozen estimate</th><th>Actual</th></tr></thead><tbody>${l.rows.map(p=>`<tr><td>${esc(p.name)}</td><td>${number(p.estimate)}</td><td>${number(p.actual)}</td></tr>`).join('')}</tbody></table></div>`).join(''))}
+    ${coverage?`<p>Historical-score retrieval: ${coverage.matched}/${coverage.expected} players matched. ${esc(coverage.scope)}</p>${coverage.missing.length?detail(`Missing historical actuals (${coverage.missing.length})`,`<ul>${coverage.missing.map(p=>`<li>${esc(p.name)} · ${esc(p.position)}</li>`).join('')}</ul>`):''}`:''}
+    ${detail('Did the observed role persist?',m.rolePersistence.length?`<p>Compares the elevated usage known at decision time with the next exact game-week observation. It is not a fantasy-point forecast, proof of acquisition, or a guarantee of future workload. Missing games remain unknown.</p><ul>${m.rolePersistence.map(r=>`<li>${esc(r.name)} · ${esc(r.metric)}: W${r.beforeWeek} ${number(r.before)} → W${r.afterWeek} ${number(r.after)}${r.retainedRatio!=null?` (${number(r.retainedRatio*100)}% retained)`:' (observation unavailable)'}. ${r.metric==='snapShare'?'Shares are fractions of 1.':''}</li>`).join('')}</ul>`:'<p>No dated numeric role-change signal was captured by this model version. Historical points alone cannot reconstruct a workload prediction.</p>')}`;
 }

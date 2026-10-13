@@ -48,19 +48,24 @@ export function learnedFallback(player,horizon=1){
 }
 
 export function forecastAccuracy(players,actuals,week,now){
-  const seen=new Set(),rows=[];
+  const seen=new Set(),rows=[],missing=[];
+  const coverage={uniquePlayers:0,noUsableForecast:0,notPreKickoff:0,missingActual:0,missingEspn:0,matched:0};
   if(!finite(now))return {count:0,status:'awaiting-matched-scores'};
   for(const p of players){
     const id=String(p.playerId),f=p.forecast,h=f?.horizons?.['1'];
-    if(seen.has(id)||!f?.usable||f.targetWeek!==week||!h)continue;
-    seen.add(id);
-    if(!p.game?.kickoff||!Number.isFinite(Date.parse(p.game.kickoff))||Date.parse(p.game.kickoff)<=now||!finite(actuals[id]))continue;
-    if(!finite(p.projectedPoints))continue; // Matched cohort for a fair comparison.
-    rows.push({prediction:h.points,espn:p.projectedPoints,actual:actuals[id],low:h.low,high:h.high});
+    if(seen.has(id))continue;
+    seen.add(id);coverage.uniquePlayers++;
+    if(!f?.usable||f.targetWeek!==week||!h){coverage.noUsableForecast++;continue;}
+    if(!p.game?.kickoff||!Number.isFinite(Date.parse(p.game.kickoff))||Date.parse(p.game.kickoff)<=now){coverage.notPreKickoff++;continue;}
+    if(!finite(actuals[id])){coverage.missingActual++;missing.push({playerId:id,name:p.name,reason:'Missing exact-week actual'});continue;}
+    if(!finite(p.projectedPoints)){coverage.missingEspn++;missing.push({playerId:id,name:p.name,reason:'Missing frozen ESPN projection'});continue;}
+    const error=Math.round((h.points-actuals[id])*100)/100,espnError=Math.round((p.projectedPoints-actuals[id])*100)/100;
+    rows.push({playerId:id,name:p.name,position:p.position,prediction:h.points,espn:p.projectedPoints,actual:actuals[id],low:h.low,high:h.high,error,espnError});
   }
-  if(!rows.length)return {count:0,status:'awaiting-matched-scores'};
+  coverage.matched=rows.length;
+  if(!rows.length)return {count:0,status:'awaiting-matched-scores',coverage,rows,missing};
   const avg=fn=>Math.round(rows.reduce((s,r)=>s+fn(r),0)/rows.length*100)/100;
-  return {count:rows.length,status:'scored',modelMae:avg(r=>Math.abs(r.prediction-r.actual)),
+  return {count:rows.length,status:'scored',coverage,rows:rows.sort((a,b)=>Math.abs(b.error)-Math.abs(a.error)||a.playerId.localeCompare(b.playerId)),missing,modelMae:avg(r=>Math.abs(r.prediction-r.actual)),
     espnMae:avg(r=>Math.abs(r.espn-r.actual)),modelBias:avg(r=>r.prediction-r.actual),
     intervalCoverage:avg(r=>Number(r.actual>=r.low&&r.actual<=r.high)),
     caveat:'Same players, predictions frozen before their kickoffs. Actual zeroes may include non-appearances; this is a live decision audit, not conditional-on-playing calibration.'};

@@ -55,9 +55,14 @@ test('archive defaults to a completed week and keyset pages without duplicates o
   assert.equal(second.entries.length,3);assert.equal(second.nextCursor,null);
   assert.equal(new Set([...first.entries,...second.entries].map(e=>e.id)).size,9);
   assert.equal((await decisionHistoryPage(env,league,{week:5,limit:2.9})).entries.length,2);
+  assert.equal((await decisionHistoryPage(env,league,{week:5,before:'2026-10-06T10:00:00Z',anchor:'pre-waiver'})).entries.length,0,'deadline is strict, not inclusive');
+  const checkpoint=await decisionHistoryPage(env,league,{week:5,before:'2026-10-06T10:00:01Z',anchor:'pre-lineup'});
+  assert.equal(checkpoint.entries.length,6);assert.match(checkpoint.explanation,/user-supplied/);
+  await assert.rejects(decisionHistoryPage(env,league,{week:5,cursor:checkpoint.nextCursor}),/Invalid archive/);
+  assert.equal((await decisionHistoryPage(env,league,{week:5,cursor:checkpoint.nextCursor,before:checkpoint.before,anchor:checkpoint.anchor})).entries.length,6);
   assert.equal((await decisionHistoryPage(env,league,{liveWeek:1})).selectedWeek,5);
   assert.deepEqual((await decisionHistoryPage(env,{leagueId:'empty',seasonYear:2026})).entries,[]);
-  for(const options of [{week:0},{week:4.5},{week:'bad'},{cursor:'bad'},{cursor:'x'.repeat(2050)},{week:5,cursor:first.nextCursor}])
+  for(const options of [{week:0},{week:4.5},{week:'bad'},{cursor:'bad'},{cursor:'x'.repeat(2050)},{week:5,cursor:first.nextCursor},{before:'tomorrow'},{anchor:'pre-waiver'},{anchor:'guessed',before:'2026-10-06T10:00:01Z'}])
     await assert.rejects(decisionHistoryPage(env,league,options),/Invalid archive/);
 });
 test('bid history never counts pending, missing-price, or unidentified transactions',()=>{

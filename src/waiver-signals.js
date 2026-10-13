@@ -13,7 +13,7 @@ export function waiverRoleSignals(player,players=[],{currentWeek=1,season,now=Da
       const baseline=average(key);
       if(baseline!=null&&finite(last[key])&&last[key]-baseline>=threshold){
         const format=v=>key==='snapShare'?`${Math.round(v*100)}%`:Number(v).toFixed(1);
-        signals.push({kind:'usage-rise',label:`Week ${last.week}: ${format(last[key])} ${label}, versus ${format(baseline)} over the prior ${prior.filter(w=>finite(w[key])).length} observed games.`,week:last.week});
+        signals.push({kind:'usage-rise',basis:'observed',metric:key,value:Number(last[key]),priorAverage:baseline,label:`Week ${last.week}: ${format(last[key])} ${label}, versus ${format(baseline)} over the prior ${prior.filter(w=>finite(w[key])).length} observed games. One elevated game is not yet a sustained role.`,week:last.week});
       }
     }
     if(finite(last.redZoneOpportunities)&&last.redZoneOpportunities>=3)signals.push({kind:'scoring-role',label:`${last.redZoneOpportunities} carries + targets inside the 20 in Week ${last.week}.`,week:last.week});
@@ -23,7 +23,7 @@ export function waiverRoleSignals(player,players=[],{currentWeek=1,season,now=Da
   // A missing starter creates a question, not a guarantee that this candidate inherits touches.
   const vacancies=players.filter(p=>id(p)!==id(player)&&(p.team||p.proTeam)===(player.team||player.proTeam)&&p.position===player.position&&unavailable(p)&&
     (Number(p.feature?.opportunity?.depthPosition)===1||Number(p.percentOwned)>=40||Number(p.feature?.opportunity?.carryShare)>=.3||Number(p.feature?.opportunity?.targetShare)>=.15));
-  for(const p of vacancies.slice(0,3))signals.push({kind:'injury-opening',playerId:id(p),label:`${p.name} is ${p.injuryStatus}. Verify who inherits the ${player.position} work; this does not establish ${player.name} as the replacement.`});
+  for(const p of vacancies.slice(0,3))signals.push({kind:'injury-opening',basis:'unconfirmed-opening',playerId:id(p),label:`${p.name} is ${p.injuryStatus} in ESPN. This is not a dated current-week official designation. Verify who inherits the ${player.position} work; this does not establish ${player.name} as the replacement.`});
   if(vacancies.length)warnings.push('Same-team injuries identify a research opportunity, not a depth-chart promotion or a medical return forecast.');
   return {signals,warnings,currentUsage:!!current,checkedAt:new Date(now).toISOString(),contextOnly:true};
 }

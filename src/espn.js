@@ -79,7 +79,8 @@ export async function fetchWaiverPool(env,league,position=null,options={}){
 export function buildOpponentLookup(games){const lookup={};for(const game of games||[]){lookup[game.homeTeam]={opponent:game.awayTeam,game};lookup[game.awayTeam]={opponent:game.homeTeam,game}}return lookup}
 export function selectedTeam(bundle){return bundle.teams.find(team=>String(team.id)===String(bundle.league.teamId))||null}
 export async function fetchHistoricalPlayerScores(env,league,week,ids){
-  const wanted=new Set(ids.map(String).filter(id=>/^-?\d{1,12}$/.test(id)).slice(0,200)),scores={};
+  const wanted=new Set(ids.map(String).filter(id=>/^-?\d{1,12}$/.test(id))),scores={};
+  if(wanted.size>1000)throw new HttpError(400,'HISTORICAL_SCORE_LIMIT','Historical score requests are limited to 1000 unique players.');
   // Reuse the proven exact-week league and waiver views. ESPN's filterIds
   // historical player-pool request is not supported consistently.
   const bundle=await fetchLeagueBundle(env,league,{week});
@@ -87,8 +88,10 @@ export async function fetchHistoricalPlayerScores(env,league,week,ids){
   const collect=players=>{for(const p of players)if(wanted.has(String(p.playerId))&&p.actualPoints!=null&&Number.isFinite(p.actualPoints))scores[String(p.playerId)]=p.actualPoints;};
   collect(allLeaguePlayers(bundle));
   if([...wanted].some(id=>!Object.hasOwn(scores,id))){
-    const free=await fetchFreeAgents(env,league,null,150,{week});
-    if(!free.cache?.stale)collect(free.players);
+    // A combined ownership-ranked pool crowds out kickers, defenses and deeper
+    // candidates. Read every position, preserving good feeds if one fails.
+    const pools=await Promise.allSettled([['QB',40],['RB',100],['WR',150],['TE',75],['K',32],['D/ST',32]].map(([position,limit])=>fetchFreeAgents(env,league,position,limit,{week})));
+    for(const result of pools)if(result.status==='fulfilled'&&!result.value.cache?.stale)collect(result.value.players);
   }
   return scores;
 }

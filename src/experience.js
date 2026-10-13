@@ -218,7 +218,7 @@ export async function handleExperience(request,env) {
   }
   if(path==='/api/decision-history'&&request.method==='GET'){
     const state=await resolve(env,opts);
-    try{return json(await decisionHistoryPage(env,state.league,{week:url.searchParams.get('snapshotWeek'),cursor:url.searchParams.get('cursor'),liveWeek:state.bundle.league.liveWeek}));}
+    try{return json(await decisionHistoryPage(env,state.league,{week:url.searchParams.get('snapshotWeek'),cursor:url.searchParams.get('cursor'),before:url.searchParams.get('before'),anchor:url.searchParams.get('anchor'),liveWeek:state.bundle.league.liveWeek}));}
     catch(error){if(error.message.startsWith('Invalid archive'))throw new HttpError(400,'INVALID_ARCHIVE_FILTER',error.message);throw error;}
   }
   if(path==='/api/decision-replay'&&request.method==='GET'){
@@ -226,7 +226,10 @@ export async function handleExperience(request,env) {
     if(!row)throw new HttpError(404,'SNAPSHOT_NOT_FOUND','Decision snapshot not found.');
     const inputs=await readSnapshot(row.inputsJson,row.inputHash),players=[...inputs.roster,...inputs.freeAgents];
     const completedWeek=row.week<state.bundle.league.liveWeek,actuals=completedWeek?await fetchHistoricalPlayerScores(env,state.league,row.week,players.map(p=>p.playerId)):{};
-    return json({snapshot:{method:row.method,inputs},actuals,completedWeek:row.week<state.bundle.league.liveWeek,explanation:'Exact-week ESPN actual scores. Missing scores are not assumed to be zero. Recent results remain provisional until ESPN stat corrections settle.'});
+    const features=completedWeek?await getPlayerFeatureLookup(env,state.league.leagueId,state.league.seasonYear,players.map(p=>p.playerId)):{};
+    const observedUsage=Object.fromEntries(Object.entries(features).map(([id,f])=>[id,(f.opportunity?.weeklyUsage||[]).filter(w=>Number(w.week)===row.week)]));
+    const expected=[...new Map(players.map(p=>[String(p.playerId),p])).values()],missing=expected.filter(p=>!Object.hasOwn(actuals,String(p.playerId))).map(p=>({playerId:String(p.playerId),name:p.name,position:p.position}));
+    return json({snapshot:{method:row.method,inputs},actuals,observedUsage,scoreCoverage:{expected:expected.length,matched:expected.length-missing.length,missing,scope:'Exact-week league rosters plus six position-specific player pools. Bounded coverage, not every historical player. Missing is unknown, never zero.'},completedWeek,explanation:'Exact-week ESPN actual scores. Missing scores are not assumed to be zero. Recent results remain provisional until ESPN stat corrections settle.'});
   }
   if(path==='/api/injury-evidence'&&request.method==='PUT'){
     const state=await resolve(env,opts),body=await requestObject(request);let evidence;

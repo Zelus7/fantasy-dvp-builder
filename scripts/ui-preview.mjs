@@ -32,6 +32,7 @@ if(reviewFixture&&!snapshot){
   mine.find(p=>p.playerId==='31').feature=kickingFeature([2,1,1,1]);agents.find(p=>p.playerId==='34').feature=kickingFeature([1,3,4,3]);
   agents[0].feature=roleFeature([13,14,12,11]);agents[0].status='WAIVERS';
   agents[1].feature=roleFeature([3.6,3.6,5.8,6.2]);agents[1].projectedPoints=10.1;agents[1].median=10.1;
+  const fallback=analyzeRoster([make(35,'Fixture Alternative Receiver','WR',10,{status:'WAIVERS'})],context)[0];fallback.feature=roleFeature([10,11,10,12]);agents.push(fallback);
 }
 const planSettings=()=>snapshot?{...snapshot.settings,now:Date.now()}:({season:2026,rolePlayers:[...mine,...theirs,...agents],slots,rosterCapacity:mine.length,currentWeek:5,endWeek:17,now:Date.now(),market:{type:'FAAB',budget:250,remaining:250,minimumBid:1,verifiedAt:new Date().toISOString()},schedules:Object.fromEntries([...mine,...theirs,...agents].map(p=>[p.playerId,{weeks:Array.from({length:17},(_,i)=>({week:i+1,bye:false,missingSchedule:false}))}]))});
 const teams=[{id:'9',name:'Synthetic Preview Team',roster:mine},{id:'2',name:'Synthetic Other Team',roster:theirs}];
@@ -80,12 +81,14 @@ const server=http.createServer(async(req,res)=>{
     else if(path==='/api/history')data={entries:[]};
     else if(path==='/api/decision-history'){
       const week=Number(url.searchParams.get('snapshotWeek')||4),offset=Number(url.searchParams.get('cursor')||0);
-      const entries=Array.from({length:9},(_,i)=>({id:`fixture-${week}-${i}`,week,mode:'week',createdAt:`2026-09-30T10:${String(i).padStart(2,'0')}:00Z`,feedback:null}));
-      data={weeks:[{week:5,count:9},{week:4,count:9},{week:3,count:9}],selectedWeek:week,entries:entries.slice(offset,offset+6),nextCursor:offset===0?'6':null,explanation:'Synthetic archive. Repeated snapshots are not independent trials.'};
+      const before=url.searchParams.get('before'),anchor=url.searchParams.get('anchor');
+      const entries=Array.from({length:9},(_,i)=>({id:`fixture-${week}-${i}`,week,mode:'week',createdAt:`2026-09-30T10:${String(8-i).padStart(2,'0')}:00Z`,feedback:null})).filter(e=>!before||Date.parse(e.createdAt)<Date.parse(before));
+      data={weeks:[{week:5,count:9},{week:4,count:9},{week:3,count:9}],selectedWeek:week,entries:entries.slice(offset,offset+6),nextCursor:entries.length>offset+6?String(offset+6):null,before,anchor,explanation:'Synthetic archive. Repeated snapshots are not independent trials.'};
     }
     else if(path==='/api/decision-replay'){
       const week=Number(url.searchParams.get('id').split('-')[1]);
-      data={snapshot:{method:WAIVER_METHOD,inputs:{roster:mine,freeAgents:agents,settings:{...planSettings(),mode:'week',currentWeek:week},waiversReady:true}},actuals:Object.fromEntries([...mine,...agents].map(p=>[p.playerId,Number(p.projectedPoints)||0])),completedWeek:week<5,explanation:'Synthetic replay only.'};
+      const auditPlayer=p=>({...p,forecast:['RB','WR'].includes(p.position)?{usable:true,targetWeek:week,horizons:{'1':{points:Number(p.projectedPoints)+1,low:0,high:30}}}:null});
+      data={snapshot:{method:WAIVER_METHOD,inputs:{roster:mine.map(auditPlayer),freeAgents:agents.map(auditPlayer),settings:{...planSettings(),mode:'week',currentWeek:week},prospective:true,waiversReady:true}},actuals:Object.fromEntries([...mine,...agents].filter(p=>p.playerId!=='35').map(p=>[p.playerId,Number(p.projectedPoints)||0])),completedWeek:week<5,explanation:'Synthetic replay only.'};
     }
     else if(path==='/api/decision-feedback')data={saved:true};
     else if(path==='/api/recommendation-history')data={recorded:false};
