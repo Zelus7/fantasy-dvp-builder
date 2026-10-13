@@ -63,6 +63,16 @@ test('matched forecast coverage reconciles exclusions and exposes signed player 
   assert.match(forecastAudit(audit),/each player counted once/);
 });
 
+test('later quarterback bye is included even beyond the near-term drop-cost screen',()=>{
+  const qb=make('Maye','QB',20,{isStarter:true,lineupSlotId:0,cantCut:true}),spare=make('Nix','QB',18),rb=make('RB','RB',1,{cantCut:true}),add=make('Marks','RB',10),replacement=make('StreamQB','QB',16);
+  const roster=[qb,spare,rb],players=[...roster,add,replacement],opts={...settings(players),endWeek:12,slots:{0:1,2:1,20:1},rosterCapacity:3,
+    schedules:Object.fromEntries(players.map(p=>[p.playerId,{weeks:[6,7,8,9,10,11,12].map(week=>({week,bye:p.playerId==='Maye'&&week===11,missingSchedule:false}))}]))};
+  const r=planWaivers([add,replacement],roster,opts).find(p=>p.playerId==='Marks');
+  assert.equal(r.dropCost,0,'near-term screen still covers only weeks 7–9');
+  assert.equal(r.dropReplacement.weeks[0].week,11);assert.equal(r.dropReplacement.weeks[0].residualLoss,2);
+  assert.ok(r.futureCoverageWeeks.includes(11));
+});
+
 test('retrospective separates start/sit, legal waiver gain, acquisition cost and usage retention',()=>{
   const current=make('Current','RB',8,{isStarter:true}),bench=make('Bench','RB',10),add=make('Add','RB',12);
   const snapshot={inputs:{roster:[current,bench],freeAgents:[add],settings:settings([current,bench,add]),prospective:true}};

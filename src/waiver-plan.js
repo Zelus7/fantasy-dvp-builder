@@ -156,7 +156,13 @@ export function planWaivers(freeAgents,roster,settings={}){
     const depth=roster.filter(p=>p.position===drop.position&&!injured(p)).length/Math.max(1,slotsForPosition);
     return [id(drop),{lost,depth,complete}];
   }));
-  const replacementByDrop=new Map(drops.filter(p=>p?.position==='QB'&&spareQuarterback).map(p=>[id(p),replacementCoverage(p,roster,candidates,future,lookahead,settings)]));
+  const last=mode==='bridge'?Math.min(endWeek,currentWeek+3):endWeek;
+  // The drop-cost screen is near-term, but the displayed scenario can extend
+  // through the season. A backup's later bye-week use still needs a replacement
+  // stress test (for example a Week 11 QB bye during a Week 6 waiver review).
+  const replacementWeeks=Array.from({length:Math.max(0,last-currentWeek)},(_,i)=>currentWeek+i+1);
+  const replacementBaseline=spareQuarterback?replacementWeeks.map(w=>weeklyRoster(roster,settings,w)):[];
+  const replacementByDrop=new Map(drops.filter(p=>p?.position==='QB'&&spareQuarterback).map(p=>[id(p),replacementCoverage(p,roster,candidates,replacementBaseline,replacementWeeks,settings)]));
   // Screen all legal pairs first; the most promising 48 moves receive the full
   // multiweek/scenario comparison. The UI discloses this bounded search.
   for(const add of candidates)for(const drop of drops){
@@ -171,7 +177,6 @@ export function planWaivers(freeAgents,roster,settings={}){
     quick.push({add,drop,afterRoster,after,gain,dropCost:cost.lost,dropCostComplete:cost.complete,depthSurplus:cost.depth,screen:gain+(futureAddValue.get(id(add))||0)-cost.lost});
   }
   quick.sort((a,b)=>(mode==='week'?b.gain-a.gain:b.screen-a.screen)||Number(b.dropCostComplete)-Number(a.dropCostComplete)||a.dropCost-b.dropCost||b.depthSurplus-a.depthSurplus||id(a.add).localeCompare(id(b.add))||String(a.drop?.playerId).localeCompare(String(b.drop?.playerId)));
-  const last=mode==='bridge'?Math.min(endWeek,currentWeek+3):endWeek;
   const weeks=Array.from({length:Math.max(1,last-currentWeek+1)},(_,i)=>currentWeek+i);
   const scenarios=roster.some(injured)?['early','planning','late']:['planning'];
   const unknownReturn=roster.some(p=>injured(p)&&(!p.injuryEvidence||Date.parse(p.injuryEvidence.reviewBy)<=now));
