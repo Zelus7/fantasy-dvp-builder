@@ -24,8 +24,11 @@ export function intelligenceCoverage(metadata={},players=[],lookup={},context={}
   return sources;
 }
 export function playerIntelligence(player,{now=Date.now(),season,week}={}){
-  const o=player.feature?.opportunity||{},context={now,season:season??player.feature?.season,week:week??player.game?.week},items=[],warnings=[];
+  const o=player.feature?.opportunity||{},context={now,season:season??player.feature?.season,week:week??player.analysisWeek??player.forecast?.targetWeek??player.game?.week},items=[],warnings=[];
   const routes=o.routes,practice=o.practice,injuries=o.injuries;
+  const currentDesignation=evidenceCurrent(practice,'practice',context)&&!!practice.gameStatus;
+  if(!currentDesignation&&['OUT','DOUBTFUL','Q','QUESTIONABLE'].includes(String(player.injuryStatus).toUpperCase()))
+    warnings.push(`ESPN's ${player.injuryStatus} is a roster label, not a dated ${context.week?`Week ${context.week}`:'current-week'} official game designation. No current-week designation is attached. An earlier OUT label does not establish another missed week; do not clear it without new evidence.`);
   if(routes){
     if(evidenceCurrent(routes,'routes',context)){
       items.push(`${routes.routesRun} routes run, season-to-date (${routes.source}; updated ${routes.sourceUpdatedAt}).`);
@@ -48,5 +51,5 @@ export function playerIntelligence(player,{now=Date.now(),season,week}={}){
     const reported=String(injuries.status).toUpperCase().replaceAll(' ','_'),fantasy=String(player.injuryStatus||'').toUpperCase();
     if(evidenceCurrent(injuries,'injuries',context)&&['OUT','INJURED_RESERVE','SUSPENDED'].includes(reported)&&['ACTIVE','NORMAL'].includes(fantasy))warnings.push('Sources disagree on availability. Verify ESPN and the latest official report before acting.');
   }
-  return {items,warnings,routes,practice,injuries,contextOnly:true};
+  return {items,warnings,routes,practice,injuries,availability:{fantasyStatus:player.injuryStatus||null,targetWeek:context.week??null,officialWeek:practice?.week??null,currentDesignation,officialStatus:currentDesignation?practice.gameStatus:null,observedAt:practice?.fetchedAt??null},contextOnly:true};
 }

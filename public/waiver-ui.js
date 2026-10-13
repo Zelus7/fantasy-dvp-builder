@@ -4,7 +4,8 @@ import {esc,number,signed,date,detail,empty,warnings,head} from './ui.js';
 export function recommendationDraftBid(player){return player.review?.spendingSupported&&player.faab?.available?player.faab.low:null;}
 
 export function planDetails(p){
-  return `${reviewDetails(p.review)}${p.faab?.available?`<p><strong>Conservative value-policy range: $${p.faab.low}–$${p.faab.high}.</strong> $${p.faab.remaining} remains. Not a predicted winning price.</p>`:''}
+  return `${reviewDetails(p.review)}<p><strong>Two different gains:</strong> ${signed(p.lineupGain)} starter points this week versus your best current roster lineup. ${p.waiverAlternative?`${signed(p.alternativeGain)} versus adding ${esc(p.waiverAlternative.name)} with the same ${p.drop?`drop (${esc(p.drop.name)})`:'open roster slot'}; that option would improve your lineup by ${signed(p.waiverAlternative.lineupGain)}.`:'No positive same-position, same-drop alternative was found in the loaded pool; this does not prove there is no replacement.'} The alternative comparison is this-week only, not a claim that the other player is free, attainable, safer, or equally valuable long term.</p>
+    ${dropContext(p)}${p.faab?.available?`<p><strong>Conservative value-policy range: $${p.faab.low}–$${p.faab.high}.</strong> $${p.faab.remaining} remains. Not a predicted winning price.</p>`:''}
     <p>${esc(p.faabExplanation||'Budget not verified.')}</p>
     ${marketDetails(p.marketContext)}
     <p>${p.benchAlternative?`Already on your bench: <strong>${esc(p.benchAlternative.name)}</strong> (${number(p.benchAlternative.estimate)} this-week estimate).`:'No currently usable same-slot bench fallback was found.'}</p>
@@ -13,6 +14,13 @@ export function planDetails(p){
     ${p.fallbackClaims?.length?`<p>Alternatives if unavailable: ${p.fallbackClaims.map(a=>`${esc(a.name)}${a.bid?` (${esc(a.bid)})`:''}${a.drop?`; drop ${esc(a.drop)}`:''}`).join(' · ')}. Choose one path; these are not cumulative claims.</p>`:''}
     ${detail('Week-by-week keep versus add/drop',`<div class="table-scroll"><table><thead><tr><th>Week</th><th>Keep roster</th><th>After move</th><th>Gain</th></tr></thead><tbody>${(p.comparison||[]).map(w=>`<tr><td>${w.week}</td><td>${w.complete?number(w.before):'Unknown'}</td><td>${w.complete?number(w.after):'Unknown'}</td><td>${w.complete?signed(w.gain):'—'}</td></tr>`).join('')}</tbody></table></div><p>Comparison scenario: ${esc(p.comparisonScenario||'planning')}. Each column uses the best available starting lineup with those players. Unfilled future slots are explicitly flagged and scored as zero, not assumed to be covered. Bench players count only when they enter a future starting lineup. Assumes no other transactions and the stated injury-return scenario.</p>`)}
     ${(p.scenarioTotals||[]).length>1?`<p>Return timing stress tests: ${p.scenarioTotals.map(s=>`${esc(s.scenario)} ${signed(s.gain)}`).join(' · ')} starter points. Scenarios have no assigned probabilities.</p>`:''}`;
+}
+
+function replacementContext(r){return r?`<p>${esc(r.explanation)}</p><ul>${r.weeks.map(w=>`<li>W${w.week}: ${number(w.uncoveredLoss)} points lost without another move.${w.replacement?` If ${esc(w.replacement.name)} were still attainable and you freed a roster slot, modeled residual loss would be ${number(w.residualLoss)}.`:' No currently available replacement has a complete estimate.'}</li>`).join('')}</ul>`:'';}
+export function dropContext(p){
+  const rows=[p,...(p.alternatives||[])].map(r=>({...r,dropCost:r.dropCostComplete===false?null:r.dropCost}));
+  if(!rows.some(r=>r.drop))return '<p>No drop required in this scenario. The bench spot still has a future opportunity cost.</p>';
+  return detail('Drop choice, future gaps & replacement cost',`<div class="table-scroll"><table><thead><tr><th>Drop option</th><th>Net gain now</th><th>Near-term starter points lost from drop alone</th><th>Extra future gaps after add/drop</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.drop?.name||'Open slot')}</td><td>${signed(r.lineupGain)}</td><td>${number(r.dropCost)}${r.dropCostWeeks?.length?` (W${r.dropCostWeeks.join(', ')})`:''}</td><td>${r.futureCoverageWeeks?.length?`W${r.futureCoverageWeeks.join(', ')}`:'None in loaded scenarios'}</td></tr>`).join('')}</tbody></table></div><p>Current gains include the drop. Drop-alone future loss is diagnostic, not an extra deduction from the displayed net gains. Future values assume no further transactions and known schedules; missing data is not proof of zero cost. Bench points, positional depth and possible trade value are not interchangeable.</p>${rows.filter(r=>r.dropReplacement).map(r=>`<h4>If you drop ${esc(r.drop.name)}</h4>${replacementContext(r.dropReplacement)}`).join('')}`);
 }
 
 export function reviewDetails(r){

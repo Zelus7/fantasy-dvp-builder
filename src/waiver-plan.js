@@ -91,12 +91,31 @@ export function bidGuidance(move,market={},now=Date.now()){
   const min=Math.max(0,Math.ceil(minimumBid)),balance=Math.max(0,Math.floor(remaining));
   if(balance<min)return {available:false,explanation:'Remaining FAAB is below the league minimum bid.'};
   // An explicit spending policy, not fitted winning odds or a dollar value of points.
-  const fraction=move.lineupGain>=5?.08:move.lineupGain>=2?.04:move.totalGain>5?.02:.01;
+  // Scarcity is the gain over another legal same-drop option, not over an empty
+  // slot. This is still a spending policy, not a learned auction-price model.
+  const marginal=finite(move.alternativeGain)?Math.max(0,Number(move.alternativeGain)):move.lineupGain;
+  const fraction=marginal>=5?.08:marginal>=2?.04:move.totalGain>5&&marginal>=.5?.02:.01;
   const cap=Math.min(balance,Math.max(min,Math.floor(budget*fraction)));
   const history=historicalBidContext(move.position,market,now);
   const low=Math.min(cap,Math.max(min,Math.floor(cap*.5))),high=cap;
-  return {available:true,low,high,max:cap,policyCeiling:cap,remaining:balance,minimumBid:min,sampleSize:history.sampleSize,marketMedian:history.median,winProbability:null,
-    explanation:`Conservative value-policy range: ${Math.round(fraction*100)}% of the original $${budget} budget at the upper end, limited by $${balance} remaining. This is not your approved spending limit or a market-clearing bid. ${history.sampleSize?`Recent ${move.position} winning prices range from $${history.low} to $${history.high} (${history.sampleSize} claims); player quality differs.${history.high>cap?' This policy range could be too low for the market.':''}`:'Verified recent winning prices are unavailable; do not assume this range will win.'} Review rival needs and set your own exact bid in the claim plan. No reliable success percentage is available.`};
+  const demand=move.marketContext?.competition;
+  return {available:true,low,high,max:cap,policyCeiling:cap,remaining:balance,minimumBid:min,sampleSize:history.sampleSize,marketMedian:history.median,winProbability:null,marginalGain:marginal,
+    explanation:`Conservative value-policy range: ${Math.round(fraction*100)}% of the original $${budget} budget at the upper end, limited by $${balance} remaining. This is not your approved spending limit or a market-clearing bid. ${move.waiverAlternative?`The scarcity input is ${marginal.toFixed(1)} incremental starter points above ${move.waiverAlternative.name}, not the full ${move.lineupGain.toFixed(1)} gain over your roster. That alternative may also require a bid and is not guaranteed.`:'No same-drop alternative was found in the loaded pool; scarcity may be overstated.'} ${history.sampleSize?`Recent ${move.position} winning prices range from $${history.low} to $${history.high} (${history.sampleSize} claims); player quality differs.${history.high>cap?' This policy range could be too low for the market.':''}`:'Verified recent winning prices are unavailable; do not assume this range will win.'} ${demand?.available?`${demand.plausibleStarterRivals} rival team(s) could use this player in their modeled lineup before choosing a drop. `:''}Future coverage and drop costs are shown separately; review them before setting an exact bid. No reliable success percentage is available.`};
+}
+
+function replacementCoverage(drop,roster,candidates,future,lookahead,settings){
+  if(!drop||drop.position!=='QB')return null;
+  const without=roster.filter(p=>id(p)!==id(drop)),rows=[];
+  for(const [i,week] of lookahead.entries()){
+    const absent=weeklyRoster(without,settings,week);
+    if(future[i].missing||absent.missing||future[i].value<=absent.value)continue;
+    const choices=candidates.filter(p=>p.position==='QB').map(p=>({player:p,lineup:weeklyRoster([...without,{...p,lineupSlotId:20,isStarter:false}],settings,week)})).filter(x=>!x.lineup.missing)
+      .sort((a,b)=>b.lineup.value-a.lineup.value||id(a.player).localeCompare(id(b.player)));
+    const best=choices[0];
+    rows.push({week,uncoveredLoss:round(future[i].value-absent.value),replacement:best?{playerId:id(best.player),name:best.player.name,status:best.player.status}:null,
+      residualLoss:best?round(Math.max(0,future[i].value-best.lineup.value)):null});
+  }
+  return rows.length?{weeks:rows,explanation:'Backup-QB replacement stress test using players available today and healthy-game baselines. Future availability, price and a roster slot are NOT guaranteed. You would need another legal add/drop. These hypothetical replacements do not erase the no-further-transactions drop cost.'}:null;
 }
 
 function deadline(add,roster,now,drop,slots,targetSlot=null){
@@ -131,11 +150,13 @@ export function planWaivers(freeAgents,roster,settings={}){
   },0)]));
   const dropCosts=new Map(drops.filter(Boolean).map(drop=>{
     const remaining=roster.filter(p=>id(p)!==id(drop));
-    const lost=lookahead.reduce((sum,w,i)=>{const after=weeklyRoster(remaining,settings,w);return sum+(!future[i].missing&&!after.missing?Math.max(0,future[i].value-after.value):0);},0);
+    let complete=true;
+    const lost=lookahead.reduce((sum,w,i)=>{const after=weeklyRoster(remaining,settings,w);complete&&=!future[i].missing&&!after.missing;return sum+(!future[i].missing&&!after.missing?Math.max(0,future[i].value-after.value):0);},0);
     const slotsForPosition=Object.entries(slots).reduce((n,[slot,count])=>n+(STARTER_SLOT_IDS.has(Number(slot))&&eligibleForSlot(drop,Number(slot))?Number(count):0),0);
     const depth=roster.filter(p=>p.position===drop.position&&!injured(p)).length/Math.max(1,slotsForPosition);
-    return [id(drop),{lost,depth}];
+    return [id(drop),{lost,depth,complete}];
   }));
+  const replacementByDrop=new Map(drops.filter(p=>p?.position==='QB'&&spareQuarterback).map(p=>[id(p),replacementCoverage(p,roster,candidates,future,lookahead,settings)]));
   // Screen all legal pairs first; the most promising 48 moves receive the full
   // multiweek/scenario comparison. The UI discloses this bounded search.
   for(const add of candidates)for(const drop of drops){
@@ -146,10 +167,10 @@ export function planWaivers(freeAgents,roster,settings={}){
     const afterRoster=[...roster.filter(p=>!drop||id(p)!==id(drop)),{...add,isStarter:false,lineupSlotId:20}];
     const after=weeklyRoster(afterRoster,settings,currentWeek);
     if(after.unfilled>baseline.unfilled)continue;
-    const gain=round(after.value-baseline.value),cost=drop?dropCosts.get(id(drop)):{lost:0,depth:Infinity};
-    quick.push({add,drop,afterRoster,after,gain,dropCost:cost.lost,depthSurplus:cost.depth,screen:gain+(futureAddValue.get(id(add))||0)-cost.lost});
+    const gain=round(after.value-baseline.value),cost=drop?dropCosts.get(id(drop)):{lost:0,depth:Infinity,complete:true};
+    quick.push({add,drop,afterRoster,after,gain,dropCost:cost.lost,dropCostComplete:cost.complete,depthSurplus:cost.depth,screen:gain+(futureAddValue.get(id(add))||0)-cost.lost});
   }
-  quick.sort((a,b)=>(mode==='week'?b.gain-a.gain:b.screen-a.screen)||a.dropCost-b.dropCost||b.depthSurplus-a.depthSurplus||id(a.add).localeCompare(id(b.add))||String(a.drop?.playerId).localeCompare(String(b.drop?.playerId)));
+  quick.sort((a,b)=>(mode==='week'?b.gain-a.gain:b.screen-a.screen)||Number(b.dropCostComplete)-Number(a.dropCostComplete)||a.dropCost-b.dropCost||b.depthSurplus-a.depthSurplus||id(a.add).localeCompare(id(b.add))||String(a.drop?.playerId).localeCompare(String(b.drop?.playerId)));
   const last=mode==='bridge'?Math.min(endWeek,currentWeek+3):endWeek;
   const weeks=Array.from({length:Math.max(1,last-currentWeek+1)},(_,i)=>currentWeek+i);
   const scenarios=roster.some(injured)?['early','planning','late']:['planning'];
@@ -177,7 +198,8 @@ export function planWaivers(freeAgents,roster,settings={}){
     const kickerTie=move.add.position==='K'&&Math.abs(move.gain)<.5&&kickingComparison(move.add,move.drop,settings)?.material;
     const samePosition=roster.filter(p=>p.position===move.add.position&&!injured(p));
     const insurance=['RB','WR','TE'].includes(move.add.position)&&move.gain>=0&&move.gain<.5&&
-      (!move.drop||move.drop.position==='QB'&&spareQuarterback)&&move.dropCost===0&&
+      (!move.drop||move.drop.position==='QB'&&spareQuarterback)&&move.dropCost===0&&move.dropCostComplete&&
+      finite(move.add.median)&&Number(move.add.median)>0&&move.add.hasEstimate!==false&&
       (samePosition.length<3||samePosition.some(p=>['Q','QUESTIONABLE'].includes(String(p.injuryStatus).toUpperCase())));
     if(!coverage||mode!=='week'&&!complete||mode==='week'&&move.gain<.5&&!kickerTie&&!insurance||mode!=='week'&&Math.max(...totals)<.5&&!kickerTie&&!insurance)continue;
     const evidence=opportunityEvidence(move.add,{now,week:currentWeek,season:settings.season}),tradeoff=Math.min(...totals)<0;
@@ -189,7 +211,7 @@ export function planWaivers(freeAgents,roster,settings={}){
       evidence,method:WAIVER_METHOD,...deadline(move.add,roster.filter(p=>!move.drop||id(p)!==id(move.drop)),now,move.drop,slots,planning.weeks[0].starters.find(p=>p.playerId===id(move.add))?.slotId),
       actionPlan:waiverActionPlan(move.add,baseline,move.after,planning.weeks,settings),
       roleEvidence:waiverRoleSignals(move.add,settings.rolePlayers||freeAgents,settings),
-      dropCost:move.dropCost,depthSurplus:move.depthSurplus,
+      dropCost:move.dropCost,dropCostComplete:move.dropCostComplete,dropCostWeeks:lookahead,depthSurplus:move.depthSurplus,dropReplacement:move.drop?replacementByDrop.get(id(move.drop))||null:null,
       reasons:[`Compared move: add ${move.add.name}; ${move.drop?`drop ${move.drop.name}`:'use the open roster spot'}.`,
         `${move.gain>=0?'+':''}${move.gain.toFixed(1)} estimated starter points this week versus keeping your roster and using its best legal lineup.`,
         `Weeks ${currentWeek}–${last}: ${complete?totalGain.toFixed(1):'incomplete'} starter-point difference under the ${unknownReturn?'most conservative return bookend':planning.scenario} scenario. Future weeks use healthy-game baselines, not exact-week projections.`,
@@ -202,14 +224,21 @@ export function planWaivers(freeAgents,roster,settings={}){
       alternatives:[],searchCoverage:{availablePlayers:candidates.length,pairs:quick.length,detailedPairs:shortlist.length}};
     result.review=reviewWaiverMove(result,roster,settings);
     result.kind=result.review.label;
-    result.faab=bidGuidance(result,settings.market,now);result.faabExplanation=result.faab.explanation;
     results.push(result);
   }
   results.sort((a,b)=>Number(b.review.spendingSupported)-Number(a.review.spendingSupported)||Number(a.tradeoff)-Number(b.tradeoff)||(mode==='week'?b.lineupGain-a.lineupGain:b.totalGain-a.totalGain)||b.totalGain-a.totalGain||a.dropCost-b.dropCost||b.depthSurplus-a.depthSurplus||id(a).localeCompare(id(b)));
-  const unique=[];for(const result of results){const existing=unique.find(p=>id(p)===id(result));if(existing){if(existing.alternatives.length<2)existing.alternatives.push({drop:result.drop,lineupGain:result.lineupGain,waiverValue:result.waiverValue});}else unique.push(result);}
+  const unique=[];for(const result of results){const existing=unique.find(p=>id(p)===id(result));if(existing){if(existing.alternatives.length<2)existing.alternatives.push({drop:result.drop,lineupGain:result.lineupGain,waiverValue:result.waiverValue,dropCost:result.dropCost,dropCostComplete:result.dropCostComplete,dropCostWeeks:result.dropCostWeeks,futureCoverageWeeks:result.futureCoverageWeeks,dropReplacement:result.dropReplacement});}else unique.push(result);}
+  for(const p of unique){
+    const alternative=quick.filter(m=>id(m.add)!==id(p)&&m.add.position===p.position&&String(m.drop?.playerId??'')===String(p.drop?.playerId??'')&&m.add.isAvailable!==false&&m.gain>0&&m.after.starters.some(s=>s.playerId===id(m.add)))
+      .sort((a,b)=>b.gain-a.gain||Number(b.add.status==='FREEAGENT')-Number(a.add.status==='FREEAGENT')||id(a.add).localeCompare(id(b.add)))[0];
+    p.waiverAlternative=alternative?{playerId:id(alternative.add),name:alternative.add.name,status:alternative.add.status,lineupGain:alternative.gain,estimate:alternative.add.median,drop:p.drop?.name||null}:null;
+    p.alternativeGain=alternative?round(p.lineupGain-alternative.gain):null;
+    p.marketContext=waiverMarketContext(p,settings.market,now);
+    p.faab=bidGuidance(p,settings.market,now);p.faabExplanation=p.faab.explanation;
+  }
   const selected=unique.slice(0,limit);
   for(const position of ['QB','RB','WR','TE','K','D/ST']){const candidate=unique.find(p=>p.position===position);if(candidate&&!selected.some(p=>p.position===position)&&limit>=6){const replace=selected.findLastIndex(p=>selected.filter(q=>q.position===p.position).length>1);if(replace>=0)selected[replace]=candidate;}}
-  return selected.map((p,i,all)=>({...p,claimPriority:i+1,marketContext:waiverMarketContext(p,settings.market,now),fallbackClaims:all.filter(a=>id(a)!==id(p)&&a.position===p.position).slice(0,2).map(a=>({playerId:id(a),name:a.name,drop:a.drop?.name,bid:a.faab.available?`$${a.faab.low}–$${a.faab.high}`:null}))}));
+  return selected.map((p,i,all)=>({...p,claimPriority:i+1,fallbackClaims:all.filter(a=>id(a)!==id(p)&&a.position===p.position).slice(0,2).map(a=>({playerId:id(a),name:a.name,drop:a.drop?.name,bid:a.faab.available?`$${a.faab.low}–$${a.faab.high}`:null}))}));
 }
 
 export function injuryHolds(roster,freeAgents,settings){

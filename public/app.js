@@ -1,5 +1,5 @@
 import {esc,number,signed,date,empty,warnings,detail,head,metric,metricHelp,playerCard,rosterRow,waiverCard,tradeCard,freshness,playerIdentity,slot} from './ui.js';
-import {holdSection,validationPanel,coverageReview} from './waiver-ui.js'; import {forecastResearch as renderForecastResearch,forecastAudit} from './forecast-ui.js';
+import {holdSection,validationPanel,coverageReview} from './waiver-ui.js'; import {forecastResearch as renderForecastResearch,forecastAudit,decisionAuditPanel} from './forecast-ui.js';
 const forecastResearch=players=>renderForecastResearch(players,state.position);
 import {normalizeNews,rankNews} from './model/news-format.js';
 import {mountClaimPlanner,queueRecommendation,clearClaimDrafts} from './claim-plan-ui.js';
@@ -126,23 +126,27 @@ function renderTrades(){
   if(o)renderReceiveOptions();
 }
 function renderReceiveOptions(){const team=currentOpportunities()?.teams?.find(t=>String(t.id)===$('#other-team')?.value);for(const selector of ['#receive','#their-extra-drop'])if($(selector))$(selector).innerHTML=playerOptions(team?.roster||[]);if($('#trade-result'))$('#trade-result').innerHTML=''}
-function replayDecision(snapshot,actuals){return new Promise((resolve,reject)=>{const worker=new Worker('/decision-replay-worker.js',{type:'module'}),timer=setTimeout(()=>{worker.terminate();reject(new Error('Historical calculation timed out.'))},60000);worker.onmessage=e=>{clearTimeout(timer);worker.terminate();resolve(e.data)};worker.onerror=()=>{clearTimeout(timer);worker.terminate();reject(new Error('Historical calculation could not load.'))};worker.postMessage({snapshot,actuals})})}
-async function showDecisionHistory({snapshotWeek=null,cursor=null}={}){
+function replayDecision(snapshot,actuals,observedUsage,feedback){return new Promise((resolve,reject)=>{const worker=new Worker('/decision-replay-worker.js',{type:'module'}),timer=setTimeout(()=>{worker.terminate();reject(new Error('Historical calculation timed out.'))},60000);worker.onmessage=e=>{clearTimeout(timer);worker.terminate();resolve(e.data)};worker.onerror=()=>{clearTimeout(timer);worker.terminate();reject(new Error('Historical calculation could not load.'))};worker.postMessage({snapshot,actuals,observedUsage,feedback})})}
+async function showDecisionHistory({snapshotWeek=null,cursor=null,before=null,anchor=null}={}){
   const container=$('#decision-history');if(!container)return;
   const request=++state.historyEpoch,epoch=state.epoch;
   container.innerHTML=empty('Checking archived decisions…');
-  const page=await api(`/api/decision-history?${params({snapshotWeek,cursor})}`);
+  const page=await api(`/api/decision-history?${params({snapshotWeek,cursor,before,anchor})}`);
   if(!container.isConnected||request!==state.historyEpoch||epoch!==state.epoch)return;
   state.historyEntries=new Map(page.entries.map(e=>[e.id,e]));
-  container.innerHTML=`<label>Archived NFL week<select id="archive-week">${(page.weeks||[]).map(w=>option(w.week,`Week ${w.week} · ${w.count} snapshots`,w.week===page.selectedWeek)).join('')}</select></label><p>${esc(page.explanation||'Exact frozen decisions, not hindsight-optimal lineups.')}</p>${page.entries.map(e=>`<section class="archive-entry"><h4>Week ${e.week} · ${esc(e.mode)} · ${esc(date(e.createdAt))}</h4><button class="secondary" data-replay-snapshot="${esc(e.id)}">Review frozen decision</button><div id="replay-${esc(e.id)}" aria-live="polite"></div></section>`).join('')||empty('No frozen decisions for this week.')}<div class="button-row">${cursor?'<button class="secondary" data-archive-cursor="">Newest in this week</button>':''}${page.nextCursor?`<button class="secondary" data-archive-cursor="${esc(page.nextCursor)}">Older snapshots</button>`:''}</div>`;
+  state.archiveFilter={before:page.before,anchor:page.anchor};
+  const localDeadline=before?new Date(Date.parse(before)-new Date(before).getTimezoneOffset()*60000).toISOString().slice(0,16):'';
+  container.innerHTML=`<label>Archived NFL week<select id="archive-week">${(page.weeks||[]).map(w=>option(w.week,`Week ${w.week} · ${w.count} snapshots`,w.week===page.selectedWeek)).join('')}</select></label><form id="archive-filter" class="form"><label>Decision checkpoint<select name="anchor">${option('pre-waiver','Pre-waiver deadline',anchor!=='pre-lineup')}${option('pre-lineup','Pre-lineup lock',anchor==='pre-lineup')}</select></label><label>Actual deadline in your device's local time<input name="before" type="datetime-local" value="${esc(localDeadline)}" required></label><button class="secondary">Find last snapshot before deadline</button><button type="button" class="secondary" data-clear-archive>Clear deadline filter</button></form><p>Use the league's actual waiver-processing deadline or the relevant lineup kickoff. We do not invent a processing time. The nearest earlier snapshot may be old; check its time and evidence. This is a comparison checkpoint, not a new prediction.</p><p>${esc(page.explanation||'Exact frozen decisions, not hindsight-optimal lineups.')}</p>${page.entries.map((e,i)=>`<section class="archive-entry"><h4>Week ${e.week} · ${esc(e.mode)} · ${esc(date(e.createdAt))}${before&&!cursor&&i===0?' · Latest before supplied deadline':''}</h4><button class="secondary" data-replay-snapshot="${esc(e.id)}">Review frozen decision</button><div id="replay-${esc(e.id)}" aria-live="polite"></div></section>`).join('')||empty('No frozen decisions for this week / deadline.')}<div class="button-row">${cursor?'<button class="secondary" data-archive-cursor="">Newest in this week</button>':''}${page.nextCursor?`<button class="secondary" data-archive-cursor="${esc(page.nextCursor)}">Older snapshots</button>`:''}</div>`;
 }
 async function reviewArchivedDecision(id){
   const entry=state.historyEntries.get(id),container=$(`#replay-${id}`),epoch=state.epoch;if(!entry||!container)return;
   container.innerHTML=empty('Replaying the original calculation and matching ESPN actuals…');
-  const replay=await api(`/api/decision-replay?${params({id})}`),outcome=await replayDecision(replay.snapshot,replay.actuals);
+  const replay=await api(`/api/decision-replay?${params({id})}`),outcome=await replayDecision(replay.snapshot,replay.actuals,replay.observedUsage,entry.feedback);
   if(!container.isConnected||epoch!==state.epoch)return;
   if(!replay.completedWeek)outcome.status='awaiting-completed-week';
+  else if(outcome.audit&&['kept','proposed','espn'].some(key=>outcome.audit.lineups[key].points==null))outcome.status='awaiting-complete-scores';
   container.innerHTML=`<p><strong>${esc(outcome.status)}</strong>${outcome.status==='scored'?` · Frozen starter gain ${signed(outcome.starterGain)}. Keep roster ${number(outcome.holdPoints)} / proposed move ${number(outcome.proposedPoints)}; ESPN-only baseline ${number(outcome.espnBaselinePoints)}.`:''}</p><p>${esc(outcome.recommendation||'')}</p>${outcome.droppedPlayerOutscoredAdd?warnings(['The dropped player outscored the add this week; review the longer-term cost.']):''}<p>${esc(outcome.explanation||replay.explanation)}</p><p>${outcome.eligibleForValidation?'Pre-kickoff decision.':'Not a clean pre-kickoff validation case.'} Repeated snapshots are not independent evidence.</p>${replay.completedWeek?forecastAudit(outcome.forecastAccuracy):''}<p>${entry.feedback?`Recorded: ${esc(entry.feedback.status)}${entry.feedback.cost!=null?` · $${entry.feedback.cost}`:''}. User reported, not ESPN verified.`:'No claim outcome recorded.'}</p>${detail('Record what you actually did',`<form class="claim-feedback" data-snapshot="${esc(id)}"><label>Outcome<select name="status"><option value="skipped">Skipped / held roster</option><option value="acquired">Acquired player</option><option value="missed">Claim unsuccessful</option></select></label><label>Player<select name="playerId"><option value="">No acquisition</option>${replay.snapshot.inputs.freeAgents.map(p=>option(p.playerId,p.name)).join('')}</select></label><label>Actual FAAB paid (if acquired)<input name="cost" type="number" min="0" step="1" placeholder="Leave blank if unknown"></label><button class="secondary">Save my outcome</button></form>`)}`;
+  if(replay.completedWeek)container.insertAdjacentHTML('beforeend',decisionAuditPanel(outcome.audit,replay.scoreCoverage));
 }
 async function reviewTrade(){
   const selected=selector=>Array.from($(selector).selectedOptions,o=>o.value).filter(Boolean),giveIds=selected('#give'),receiveIds=selected('#receive');
@@ -170,10 +174,16 @@ document.addEventListener('change',event=>{
   if(event.target.id==='trade-mode'){state.tradeMode=event.target.value;renderTrades();void loadOpportunities()}
   if(event.target.id==='archive-week')void run(null,()=>showDecisionHistory({snapshotWeek:Number(event.target.value)}));
 });
+document.addEventListener('submit',event=>{
+  if(event.target.id!=='archive-filter')return;
+  event.preventDefault();const form=event.target,values=Object.fromEntries(new FormData(form));
+  void run(form.querySelector('button'),()=>showDecisionHistory({snapshotWeek:Number($('#archive-week').value),anchor:values.anchor,before:new Date(values.before).toISOString()}));
+});
 document.addEventListener('click',event=>{
   const b=event.target.closest('button');if(!b)return;
   if(b.dataset.replaySnapshot)void run(b,()=>reviewArchivedDecision(b.dataset.replaySnapshot));
-  if(b.hasAttribute('data-archive-cursor'))void run(b,()=>showDecisionHistory({snapshotWeek:Number($('#archive-week').value),cursor:b.dataset.archiveCursor||null}));
+  if(b.hasAttribute('data-archive-cursor'))void run(b,()=>showDecisionHistory({snapshotWeek:Number($('#archive-week').value),cursor:b.dataset.archiveCursor||null,...state.archiveFilter}));
+  if(b.hasAttribute('data-clear-archive'))void run(b,()=>showDecisionHistory({snapshotWeek:Number($('#archive-week').value)}));
 });
 function checkOnResume(){if(document.hidden||state.loading||!state.data||Date.now()-state.lastLoad<180000)return;if(['trades','compare','settings','waivers'].includes(state.current)){const status=$('#data-status .data-summary');if(status)status.textContent='Data is more than 3 minutes old. Refresh before acting; your form selections have been preserved.';return}void loadWorkspace({visit:true})}
 document.addEventListener('visibilitychange',checkOnResume);window.addEventListener('online',checkOnResume);setInterval(checkOnResume,60000);
