@@ -6,7 +6,7 @@ const samples=[
 const $=selector=>document.querySelector(selector),dialog=$('#preview-dialog');
 let lastView='';
 function showMessage(message){$('#dialog-message').textContent=message;dialog.showModal();}
-function state(){const [view,query]=(location.hash.slice(1)||'dashboard').split('?');const params=new URLSearchParams(query);return {view:view==='waivers'?'waivers':'dashboard',period:['week','bridge','ros'].includes(params.get('period'))?params.get('period'):'week',position:params.get('position')||'All',query:params.get('q')||'',section:params.get('section')}}
+function state(){const [view,query]=(location.hash.slice(1)||'dashboard').split('?');const params=new URLSearchParams(query);return {view:view==='main'?lastView||'dashboard':view==='waivers'?'waivers':'dashboard',period:['week','bridge','ros'].includes(params.get('period'))?params.get('period'):'week',position:params.get('position')||'All',query:params.get('q')||'',section:params.get('section')}}
 function navigate(changes){const next={...state(),...changes},params=new URLSearchParams();for(const key of ['period','position'])if(next[key]!==({period:'week',position:'All'})[key])params.set(key,next[key]);if(next.query)params.set('q',next.query);location.hash=next.view+(params.size?'?'+params:'');}
 function render(){
   const s=state();
