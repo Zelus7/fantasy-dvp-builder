@@ -3,8 +3,12 @@
 ## October 14 identity and history repair
 
 Player names are now retained independently of current roster membership or
-saved worksheets. Unknown own-team claim IDs use bounded, fixed-origin public
-ESPN athlete/team GETs with no session cookies. The cache is league/season
+saved worksheets. Unknown own-team claim IDs first reuse identities from the
+same league/season's normalized waiver caches, then use bounded, fixed-origin
+public ESPN athlete/team GETs with no session cookies. An expired waiver cache
+can supply a name, never current ownership, availability or transaction evidence.
+This also covers dropped players when the public identity endpoint is unavailable.
+The retained identity cache is league/season
 scoped, atomically merged, and contains only identity fields. It cannot assert
 availability, roster membership, freshness, submission or a successful claim.
 Negative fantasy defense IDs are validated against the known NFL team mapping.

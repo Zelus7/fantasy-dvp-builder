@@ -9,7 +9,7 @@ const league={leagueId:'1',seasonYear:2026};
 function database(t){
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
   db.exec(readFileSync(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8'));
-  return {db,env:{DB:{prepare(sql){const make=(a=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...a)},async run(){return db.prepare(sql).run(...a)}});return make()}}}};
+  return {db,env:{DB:{prepare(sql){const make=(a=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...a)},async all(){return {results:db.prepare(sql).all(...a)}},async run(){return db.prepare(sql).run(...a)}});return make()}}}};
 }
 
 test('identity merge retains position and normalizes numeric IDs without preserving roster fields',()=>{
@@ -59,4 +59,16 @@ test('lookups are bounded and failure to retain identities does not erase availa
   const failing={DB:{prepare(){throw new Error('storage unavailable')}}};
   const fallback=await resolvePlayerIdentities(failing,league,[{playerId:21,name:'Known player'}],['21']);
   assert.equal(fallback.players[0].name,'Known player');assert.equal(fallback.coverage.persistence,'unavailable');
+});
+
+test('a dropped player is named from scoped normalized waiver caches even if public lookup fails',async t=>{
+  const {db,env}=database(t);let calls=0;
+  t.mock.method(globalThis,'fetch',async()=>{calls++;throw new Error('Public lookup unavailable from worker')});
+  const insert=db.prepare('INSERT INTO api_cache(cache_key,payload_json,expires_at,updated_at) VALUES(?,?,?,?)');
+  insert.run('espn:v2:freeagents:1:2026:6:QB:75',JSON.stringify([{playerId:'4426338',name:'Bo Nix',position:'QB',status:'FREEAGENT',projectedPoints:18}]),'2020-01-01','2026-10-14 12:00:00');
+  insert.run('espn:v2:freeagents:2:2026:6:QB:75',JSON.stringify([{playerId:'4426338',name:'Wrong league name',position:'QB'}]),'2099-01-01','2026-10-14 13:00:00');
+  const result=await resolvePlayerIdentities(env,league,[],['4426338']);
+  assert.deepEqual(result.players,[{playerId:'4426338',name:'Bo Nix',position:'QB'}]);assert.equal(calls,0);assert.equal(result.coverage.unresolved,0);
+  db.prepare('DELETE FROM api_cache WHERE cache_key LIKE ?').run('espn:v2:freeagents:%');
+  assert.equal((await resolvePlayerIdentities(env,league,[],['4426338'])).players[0].name,'Bo Nix');assert.equal(calls,0);
 });

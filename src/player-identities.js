@@ -44,8 +44,20 @@ export async function fetchPublicIdentity(value){
 export async function resolvePlayerIdentities(env,league,seeds,ids){
   let retained=[];
   try{const value=(await cacheGet(env,key(league),true))?.value;retained=Object.values(value||{}).slice(0,5000);}catch{/* Names must not block transaction evidence. */}
-  const known=mergeIdentities(retained,seeds),byId=new Map(known.map(p=>[p.playerId,p]));
-  const wanted=[...new Set(ids.map(playerId).filter(Boolean))],missing=wanted.filter(id=>!byId.has(id)).slice(0,12);
+  let known=mergeIdentities(retained,seeds);
+  const byId=new Map(known.map(p=>[p.playerId,p]));
+  const wanted=[...new Set(ids.map(playerId).filter(Boolean))],unknown=wanted.filter(id=>!byId.has(id)).slice(0,12);
+  // A dropped player may already be known to the normal fantasy waiver feed.
+  // Reuse that identity even if availability has expired; never reuse its status.
+  if(unknown.length)try{
+    const {results}=await env.DB.prepare(`SELECT json_extract(p.value,'$.playerId') AS playerId,
+      json_extract(p.value,'$.name') AS name,json_extract(p.value,'$.position') AS position
+      FROM api_cache c,json_each(CASE WHEN json_valid(c.payload_json) THEN c.payload_json ELSE '[]' END) p
+      WHERE c.cache_key LIKE ? AND CAST(json_extract(p.value,'$.playerId') AS TEXT) IN (${unknown.map(()=>'?').join(',')})
+      ORDER BY c.updated_at DESC LIMIT 500`).bind(`espn:v2:freeagents:${league.leagueId}:${league.seasonYear}:%`,...unknown).all();
+    known=mergeIdentities((results||[]).toReversed(),known);
+  }catch{/* A missing normalized cache is not a failed transaction read. */}
+  const cachedIds=new Set(known.map(p=>p.playerId)),missing=unknown.filter(id=>!cachedIds.has(id));
   const found=[];
   for(let i=0;i<missing.length;i+=6)found.push(...await Promise.all(missing.slice(i,i+6).map(fetchPublicIdentity)));
   const result=mergeIdentities(known,found.filter(Boolean)),before=new Map(mergeIdentities(retained).map(p=>[p.playerId,p]));
