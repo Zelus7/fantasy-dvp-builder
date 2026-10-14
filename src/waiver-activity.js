@@ -79,13 +79,14 @@ export async function syncActivity(env,league,fetchPage,{force=false}={}){
 }
 
 export function enrichActivity(rows,players,teams=[]){
-  const byId=new Map(players.map(p=>[String(p.playerId),p])),names=new Map(teams.map(t=>[String(t.id),t.name]));
-  return rows.map(r=>({...r,playerName:byId.get(r.playerId)?.name||`Player ${r.playerId}`,position:byId.get(r.playerId)?.position||null,dropName:r.dropId?(byId.get(r.dropId)?.name||`Player ${r.dropId}`):null,teamName:names.get(r.teamId)||`Team ${r.teamId}`}));
+  const byId=new Map(),names=new Map(teams.map(t=>[String(t.id),t.name]));
+  for(const p of players){const id=String(p.playerId);byId.set(id,{...byId.get(id),...Object.fromEntries(Object.entries(p).filter(([,v])=>v!=null&&v!==''))});}
+  return rows.map(r=>({...r,playerName:byId.get(String(r.playerId))?.name||'Player name unavailable',nameMissing:!byId.get(String(r.playerId))?.name,position:byId.get(String(r.playerId))?.position||null,dropName:r.dropId?(byId.get(String(r.dropId))?.name||'Player name unavailable'):null,teamName:names.get(String(r.teamId))||`Team ${r.teamId}`}));
 }
 
 export function activitySummary(activity,archive,league,players,teams,plan,roster,rosterCache){
   const rows=enrichActivity(archive.rows,players,teams),own=rows.filter(r=>r.teamId===String(league.teamId)),pending=enrichActivity(activity.pending.rows||[],players,teams);
-  const rosterFresh=!rosterCache?.stale&&Date.now()-Date.parse(rosterCache?.updatedAt)<300000;
+  const age=Date.now()-Date.parse(rosterCache?.updatedAt),rosterFresh=!rosterCache?.stale&&age>=0&&age<300000;
   const claims=(plan.claims||[]).map(c=>{
     const matches=own.filter(r=>r.playerId===c.addId&&r.dropId===(c.dropId||null)&&r.bid===c.bid&&r.week===plan.week&&Date.parse(r.at)>=Date.parse(plan.updatedAt));
     const receipt=matches.length===1?matches[0]:null,onRoster=rosterFresh?roster.some(p=>String(p.playerId)===c.addId):null;
@@ -93,7 +94,8 @@ export function activitySummary(activity,archive,league,players,teams,plan,roste
     const dropGone=rosterFresh&&c.dropId&&!roster.some(p=>String(p.playerId)===c.dropId);
     return {addId:c.addId,addName:c.addName,receipt,onRoster,status:receipt?.status||'unresolved',next:matches.length>1?'Multiple matching ESPN transactions; review the report.':receipt?.status==='won'?(onRoster===true?'Acquired. Recheck your best lineup.':'ESPN recorded a win; the current roster may reflect a later move.'):primary?`Fallback not needed: ${primary.playerName} won using the same conditional drop. Do not repeat the fallback automatically.`:receipt?(dropGone?'The original drop is no longer on your roster. Reassess current waiver options; do not repeat this old add/drop.':onRoster===false?'Target missed. Reassess this position and remaining free agents.':'Recheck the live roster before choosing a replacement.'):'No unique processed result matched this saved plan. Do not assume it was submitted.'};
   });
-  return {...activity,pending:{...activity.pending,rows:pending},outcomes:own.slice(0,40),claims,conflicts:archive.conflicts,
+  const currentWeek=Number(league.liveWeek||league.currentWeek);
+  return {...activity,currentWeek,planWeek:plan.week,historicalPlan:Number(plan.week)!==currentWeek,pending:{...activity.pending,rows:pending},outcomes:own.slice(0,40),claims,conflicts:archive.conflicts,
     recentSpend:own.filter(r=>r.week===Number(league.liveWeek||league.currentWeek)).reduce((n,r)=>n+r.paid,0),
     explanation:'Direct read-only ESPN records, kept separately from pasted reports. Spend is the sum of observed completed wins this scoring week, not a full budget audit. Unmatched plans and incomplete feeds remain unconfirmed.'};
 }

@@ -60,6 +60,7 @@ export function reviewWaiverMove(move,roster,settings={}){
   const growth=(move.roleEvidence?.signals||[]).some(s=>['usage-rise','scoring-role'].includes(s.kind));
   const benefit=move.mode==='week'?move.lineupGain:move.totalGain;
   const starts=move.actionPlan?.startWeeks||[];
+  const contingency=move.contingencies?.[0];
   const close=move.lineupGain<.5&&move.lineupGain>=-.5;
   const missing=[];
   if(!observed)missing.push(move.position==='K'?'At least three current observed kicking games.':'Current-season role history through the latest completed week.');
@@ -72,20 +73,20 @@ export function reviewWaiverMove(move,roster,settings={}){
   if(poor&&!growth)counter.push(`Each of the last ${points.length} observed scores was below 75% of the current ESPN projection. No observed workload-growth signal establishes a rebound.`);
   if(o?.touchdownDependent)counter.push('Recent touchdowns came on limited opportunities; repeatable volume is not established.');
   if(move.tradeoff)counter.push('At least one return scenario favors holding your roster.');
-  if(!starts.length)counter.push('No starting week is established in this comparison; this is only optional bench insurance.');
+  if(!starts.length)counter.push(contingency?`This player does not improve the normal lineup. The ${contingency.gain.toFixed(1)}-point benefit exists only if ${contingency.name} cannot play; it is not added to the baseline forecast.`:'No starting week is established in this comparison; this is only optional bench insurance.');
   if(uncertain)counter.push('Availability needs confirmation before committing a starting slot or paid bid.');
   if(move.drop)counter.push(`Dropping ${move.drop.name} gives up their depth and future options; reacquisition is not guaranteed.`);
   if(move.position==='K')counter.push('Kicker opportunities and long-distance conversion can regress; weather and game script can reverse the preference.');
   if(move.position==='D/ST')counter.push('Defensive touchdowns and turnovers are volatile; a favorable projection is not a stable weekly floor.');
   if(!counter.length)counter.push('Forecast error and subsequent role changes can erase the estimated benefit.');
   const supported=observed&&!uncertain&&!(poor&&!growth)&&!o?.touchdownDependent&&!move.tradeoff&&benefit>=2&&starts.length>0&&!close;
-  const category=conflict?'availability-review':poor&&!growth?'watch':!starts.length?'insurance':close?'close-call':supported?'supported-upgrade':'review-needed';
-  const labels={'availability-review':'Availability check required',watch:'Hold / watch — rebound unproven',insurance:'Optional bench insurance','close-call':'Close projection — review evidence','supported-upgrade':'Evidence-supported upgrade','review-needed':'Review before acting'};
+  const category=conflict?'availability-review':poor&&!growth?'watch':contingency&&close?'injury-contingency':!starts.length?'insurance':close?'close-call':supported?'supported-upgrade':'review-needed';
+  const labels={'availability-review':'Availability check required',watch:'Hold / watch — rebound unproven','injury-contingency':'Conditional injury cover',insurance:'Optional bench insurance','close-call':'Close projection — review evidence','supported-upgrade':'Evidence-supported upgrade','review-needed':'Review before acting'};
   return {version:1,category,label:labels[category],spendingSupported:!!supported,evidenceConfidence:observed?'Observed sample':'Incomplete evidence',
     forecastConfidence:'Not a calibrated probability',missing,counterarguments:counter,kicking,
     baseline:`Keep your roster and use its best legal lineup; modeled ${move.mode==='week'?'weekly':'window'} difference is ${Number(benefit).toFixed(1)} points.`,
-    whyNow:growth?'Recent workload/scoring-role evidence merits review.':kicking?.material?kicking.explanation:poor?'No verified catalyst for the projected rebound.':'The modeled lineup comparison—not an assumed breakout—is the basis for considering this move.',
-    scope:starts.length?`Conditional starting weeks: ${starts.join(', ')}.`:'No modeled starting week; do not pay a starter-upgrade price.',
+    whyNow:contingency?contingency.explanation:growth?'Recent workload/scoring-role evidence merits review.':kicking?.material?kicking.explanation:poor?'No verified catalyst for the projected rebound.':'The modeled lineup comparison—not an assumed breakout—is the basis for considering this move.',
+    scope:contingency?`Week ${currentWeek} insurance only if ${contingency.name} is out. No estimated absence probability or automated paid bid.`:starts.length?`Conditional starting weeks: ${starts.join(', ')}.`:'No modeled starting week; do not pay a starter-upgrade price.',
     alternatives:[{kind:'hold',label:'Keep current roster',gain:0},{kind:'move',label:move.drop?`Add ${move.name}; drop ${move.drop.name}`:`Add ${move.name}`,gain:benefit}],
     checkedAt:new Date(now).toISOString(),critical:conflict,
     reviewTriggers:['Recheck practice and active status before the relevant kickoff.','Recheck role, teammate returns, ownership and acquisition cost.','If the expected starting opportunity disappears, reassess holding rather than automatically churn.']};

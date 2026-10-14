@@ -32,13 +32,14 @@ test('kicker stale, wrong-season and team-mismatch evidence cannot surface a nea
   }
 });
 test('Dobbins shape: consistent low output and no workload catalyst is a watch, not a paid upgrade',()=>{
-  const a=player('Lead','RB',23),b=player('Second','RB',13),qb=player('Starter QB','QB',18),spare=player('Spare QB','QB',16);
+  const a=player('Lead','RB',23),b=player('Second','RB',13,{injuryStatus:'QUESTIONABLE'}),qb=player('Starter QB','QB',18),spare=player('Spare QB','QB',16);
   const add=player('Volume only','RB',10.1,{status:'WAIVERS',feature:history([3.6,3.6,5.8,6.2])});
   const roster=[a,b,qb,spare],settings={...options([...roster,add]),slots:{0:1,2:2,20:1},rosterCapacity:4};
   const result=planWaivers([add],roster,settings)[0];
   assert.equal(result.drop.playerId,'Spare QB');assert.equal(result.lineupGain,0);
   assert.equal(result.review.category,'watch');assert.equal(result.review.spendingSupported,false);
   assert.equal(result.faab.available,false);assert.match(result.review.counterarguments.join(' '),/No observed workload-growth/);
+  assert.equal(planWaivers([add],roster.map(p=>({...p,injuryStatus:'ACTIVE'})),settings).length,0,'ordinary zero-gain depth is not an actionable recommendation');
 });
 test('a current sustained role and real starter benefit may support value-policy guidance',()=>{
   const old=player('Old','RB',10),add=player('Better','RB',15,{status:'WAIVERS',feature:history([14,13,16,14])});

@@ -1,11 +1,13 @@
 import {weeklyRoster,healthyBaseline} from './waiver-plan.js';
+import {eligibleForSlot} from './analysis.js';
+import {tradeValueContext,tradeValueBalance,tradePackageValue} from './trade-value.js';
 
 const id=p=>String(p.playerId),round=n=>Math.round(n*10)/10;
 const active=p=>![21,22].includes(Number(p.lineupSlotId));
 const injured=p=>['OUT','IR','INJURY_RESERVE','DOUBTFUL','SUSPENDED','SUSPENSION'].includes(String(p.injuryStatus).toUpperCase());
 const transferable=p=>['QB','RB','WR','TE'].includes(p.position)&&healthyBaseline(p)!=null;
 const arrival=p=>({...p,isStarter:false,lineupSlotId:20});
-export const TRADE_METHOD='calendar-roster-fit-v1';
+export const TRADE_METHOD='calendar-roster-fit-v2';
 
 export function tradeWindow(settings={}){
   const current=Number(settings.currentWeek),start=Number(settings.effectiveWeek??current);
@@ -65,38 +67,73 @@ export function evaluateTradePlan(yourRoster,theirRoster,giveIds,receiveIds,sett
     return result;
   });
   const planning=scenarioResults.find(r=>r.scenario==='planning'),complete=scenarioResults.every(r=>r.your.complete&&r.their.complete);
-  const value=players=>players.reduce((s,p)=>s+healthyBaseline(p),0),giveValue=value(give),receiveValue=value(receive);
-  const imbalance=Math.abs(giveValue-receiveValue)/Math.max(giveValue,receiveValue,1);
+  const valueContext=settings._valueContext||tradeValueContext(settings.leagueTeams||[{roster:yourRoster},{roster:theirRoster}],settings);
+  const valueScenarios=scenarios.map(scenario=>({scenario,...tradeValueBalance(give,receive,valueContext,weeks,settings,scenario)}));
+  const value=valueScenarios.find(s=>s.scenario==='planning'),balanced=valueScenarios.every(s=>s.balanced);
   const noNewGaps=scenarioResults.every(r=>['your','their'].every(side=>r[side].weeks.every(w=>w.newGaps===0)));
   const robust=complete&&scenarioResults.every(r=>r.your.gain/weeks.length>=.5&&r.their.gain/weeks.length>=.5);
-  const viable=robust&&noNewGaps&&imbalance<=.2;
+  const viable=robust&&noNewGaps&&balanced;
   const conditional=extraMoves.your.adds.length+extraMoves.their.adds.length>0;
   return {viable,recommendation:viable?(conditional?'conditional-mutual-fit':'mutual-fit'):'needs-review',give,receive,
-    giveValue:round(giveValue),receiveValue:round(receiveValue),imbalance:round(imbalance*100),method:TRADE_METHOD,
+    giveValue:value.sent.value,receiveValue:value.received.value,imbalance:value.imbalance==null?null:round(value.imbalance*100),method:TRADE_METHOD,
+    valueReview:{...value,scenarios:valueScenarios,context:valueContext,marketVerified:false,acceptanceProbability:null,
+      policy:'At most 25% replacement-surplus imbalance in every injury bookend; secondary package pieces count at 80% to discourage quantity-for-quality offers. These are conservative screening choices, not empirically calibrated market prices.'},
     window:{start:weeks[0],end:weeks.at(-1),count:weeks.length},yourImpact:planning.your,theirImpact:planning.their,
     scenarioResults,complete,conditional,extraMoves:Object.fromEntries(Object.entries(extraMoves).map(([k,{after,...v}])=>[k,v])),
-    reason:!complete?'Schedule or estimate coverage is incomplete; no full-window value claim.':!noNewGaps?'The exchange creates additional starting-slot gaps in at least one return scenario.':imbalance>.2?'More than 20% exchanged-baseline imbalance; not a balanced offer under this screen.':!robust?'Both teams do not improve by at least 0.5 starter points per week across every return scenario.':conditional?'Both rosters improve if the named extra acquisitions succeed. This is not a secured trade path.':'Both teams improve across the displayed weeks and all return bookends, with comparable exchanged baseline value.',
+    reason:!complete?'Schedule or estimate coverage is incomplete; no full-window value claim.':!noNewGaps?'The exchange creates additional starting-slot gaps in at least one return scenario.':!balanced?'The exchanged league-relative surplus is incomplete, uninformative, or more than 25% apart in a return bookend. Roster fit alone does not establish a fair offer.':!robust?'Both teams do not improve by at least 0.5 starter points per week across every return scenario.':conditional?'Both rosters improve if the named extra acquisitions succeed. This is not a secured trade path.':'Both teams improve across the displayed weeks and all return bookends, and the position-adjusted exchange clears the balance screen. The other manager’s willingness is still unknown.',
     warnings:[`Assumes the trade and named extra moves complete before Week ${weeks[0]} games. Verify your league's trade review period.`,
       'Future weeks use healthy-game baselines, not calibrated exact-week forecasts. Injury scenarios have no assigned probabilities.',
-      'The 20% balance and 0.5-point weekly-gain rules are screening policies, not trade-market prices or acceptance odds.',
+      'The 25% surplus-balance, 80% secondary-piece weight and 0.5-point weekly-gain rules are screening policies, not trade-market prices or acceptance odds.',
+      'Replacement levels come from the loaded league rosters and free-agent pool, not external rankings. Role changes and market sentiment can invalidate the comparison.',
       ...(conditional?['A free-agent addition is conditional: budget, competing claims and availability can invalidate this path.']:[]),
       ...(extraMoves.your.openSlots||extraMoves.their.openSlots?['Open roster spots have no invented value. Select an explicit conditional addition to compare a follow-up move.']:[])]};
 }
 
 export function discoverTradePlans(teams,yourTeamId,settings={}){
   const own=teams.find(t=>String(t.id)===String(yourTeamId));if(!own)return [];
-  const eligible=roster=>roster.filter(transferable).sort((a,b)=>healthyBaseline(b)-healthyBaseline(a)).slice(0,8);
+  const weeks=tradeWindow(settings);if(!weeks.length)return [];
+  const _valueContext=tradeValueContext(teams,settings),_baselineCache=new Map();
+  const valueCache=new Map();
+  const packageValue=players=>{const key=players.map(id).join(',');if(!valueCache.has(key))valueCache.set(key,tradePackageValue(players,_valueContext,weeks,settings));return valueCache.get(key)};
+  const singleValue=p=>packageValue([p]).value;
+  const eligible=roster=>{
+    const all=roster.filter(transferable).sort((a,b)=>singleValue(b)-singleValue(a)||id(a).localeCompare(id(b)));
+    const priority=['QB','RB','WR','TE'].flatMap(position=>all.filter(p=>p.position===position).slice(0,2));
+    return [...new Set([...priority,...all])].slice(0,12);
+  };
   const bundles=players=>players.flatMap((p,i)=>[[p],...players.slice(i+1).map(q=>[p,q])]);
   const yours=bundles(eligible(own.roster).filter(p=>!(settings.protectedIds||[]).map(String).includes(id(p)))),results=[];
-  const total=players=>players.reduce((s,p)=>s+healthyBaseline(p),0),_baselineCache=new Map();
+  const prepared=roster=>{
+    const lineup=weeklyRoster(roster,settings,weeks[0]);
+    return {lineup,players:new Map(roster.map(p=>[id(p),p]))};
+  };
+  const ownBase=prepared(own.roster),removals=new Map();
+  // Cheap fit screening guides search only. Every displayed offer still gets
+  // the full bilateral optimizer, capacity, lock and injury-bookend checks.
+  const fit=(roster,base,outgoing,incoming)=>{
+    const key=roster.map(id).join(',')+':'+outgoing.map(id).join(',');
+    if(!removals.has(key))removals.set(key,weeklyRoster(roster.filter(p=>!outgoing.some(o=>id(o)===id(p))),settings,weeks[0]));
+    const remaining=removals.get(key);
+    const upside=incoming.reduce((sum,p)=>{
+      const slots=remaining.starters.filter(s=>eligibleForSlot(p,s.slotId));
+      const floor=slots.length?Math.min(...slots.map(s=>s.estimate)):0;
+      return sum+Math.max(0,healthyBaseline(p)-floor);
+    },0);
+    return upside-(base.lineup.value-remaining.value);
+  };
   for(const team of teams.filter(t=>t!==own)){
-    const pairs=[];
-    for(const give of yours)for(const receive of bundles(eligible(team.roster))){
-      const diff=Math.abs(total(give)-total(receive))/Math.max(total(give),total(receive),1);
-      if(diff<=.2)pairs.push({give,receive,diff});
+    const pairs=[],theirBase=prepared(team.roster),theirBundles=bundles(eligible(team.roster));
+    for(const give of yours)for(const receive of theirBundles){
+      const sent=packageValue(give),received=packageValue(receive),diff=Math.abs(sent.value-received.value)/Math.max(sent.value,received.value,1);
+      if(sent.complete&&received.complete&&sent.value>0&&received.value>0&&diff<=.25)pairs.push({give,receive,diff,fit:Math.min(fit(own.roster,ownBase,give,receive),fit(team.roster,theirBase,receive,give))});
     }
-    // Reserve room for each package shape, including 2-for-1; bounded search.
-    const shortlist=['1:1','2:2','2:1','1:2'].flatMap(shape=>pairs.filter(p=>`${p.give.length}:${p.receive.length}`===shape).sort((a,b)=>a.diff-b.diff).slice(0,4));
+    // Up to eight per shape, including positional diversity, not just the four
+    // closest raw-point packages. No exhaustive-search or acceptance claim.
+    const shortlist=['1:1','2:2','2:1','1:2'].flatMap(shape=>{
+      const group=pairs.filter(p=>`${p.give.length}:${p.receive.length}`===shape).sort((a,b)=>b.fit-a.fit||a.diff-b.diff);
+      const diverse=new Map();for(const pair of group){const signature=pair.give.map(p=>p.position).sort().join('+')+':'+pair.receive.map(p=>p.position).sort().join('+');if(!diverse.has(signature))diverse.set(signature,pair);}
+      return [...new Set([...group.slice(0,4),...[...diverse.values()].slice(0,2),...group.toSorted((a,b)=>a.diff-b.diff).slice(0,2),...group])].slice(0,8);
+    });
     for(const {give,receive} of shortlist){
       const extra={};
       for(const [side,roster,outgoing,incoming] of [['your',own.roster,give,receive],['their',team.roster,receive,give]]){
@@ -107,8 +144,8 @@ export function discoverTradePlans(teams,yourTeamId,settings={}){
           extra[`${side}DropIds`]=drops.map(id);
         }
       }
-      const result=evaluateTradePlan(own.roster,team.roster,give.map(id),receive.map(id),{...settings,...extra,_baselineCache});
-      if(result.viable)results.push({...result,otherTeam:{id:team.id,name:team.name}});
+      const result=evaluateTradePlan(own.roster,team.roster,give.map(id),receive.map(id),{...settings,...extra,_baselineCache,_valueContext});
+      if(result.viable)results.push({...result,otherTeam:{id:team.id,name:team.name},searchCoverage:{balancedPairs:pairs.length,detailedPairs:shortlist.length,maximumPerTeam:32,exhaustive:false}});
     }
   }
   return results.sort((a,b)=>Math.min(b.yourImpact.gain,b.theirImpact.gain)-Math.min(a.yourImpact.gain,a.theirImpact.gain)).slice(0,settings.limit??8);

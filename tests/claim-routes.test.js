@@ -12,10 +12,11 @@ test('authenticated claim plans validate against fresh ESPN reads, persist, and 
   const env={SESSION_SECRET:'fixture-signing-secret-32-characters',CREDENTIAL_ENCRYPTION_KEY:Buffer.alloc(32,2).toString('base64'),DB:{prepare(sql){const make=(a=[])=>({bind(...v){return make(v)},async first(){return db.prepare(sql).get(...a)||null},async all(){return {results:db.prepare(sql).all(...a)}},async run(){return {meta:{changes:Number(db.prepare(sql).run(...a).changes)}}}});return make()},async batch(statements){return Promise.all(statements.map(s=>s.run()))}}};
   await saveCredentials(env,{swid:'fixture-owner',s2:'fixture-cookie'});await saveLeagues(env,[{leagueId:'1',teamId:'9',seasonYear:2026,leagueName:'Fixture'}]);
   const player=(id,name)=>({id,fullName:name,defaultPositionId:3,eligibleSlots:[4,23],proTeamId:2,injuryStatus:'ACTIVE'});
-  let unavailable=false,scoreboardBlocked=false,requests=0;
+  let unavailable=false,scoreboardBlocked=false,requests=0,pendingTransactions=[];
   t.mock.method(globalThis,'fetch',async(url,options)=>{
     assert.ok(!options.method||options.method==='GET','No external writes are permitted');requests++;
-    if(String(url).includes('mPendingTransactions'))return Response.json({id:1,seasonId:2026,pendingTransactions:[]});
+    if(String(url).includes('sports.core.api.espn.com')){assert.equal(options.headers.Cookie,undefined);return Response.json({id:'34',displayName:'Outside worksheet',position:{abbreviation:'RB'}});}
+    if(String(url).includes('mPendingTransactions'))return Response.json({id:1,seasonId:2026,pendingTransactions});
     if(String(url).includes('mTransactions2')){
       assert.ok(new URL(url).searchParams.has('scoringPeriodId'));assert.deepEqual(JSON.parse(options.headers['x-fantasy-filter']),{transactions:{filterType:{value:['WAIVER','WAIVER_ERROR']}}});
       return Response.json({id:1,seasonId:2026,transactions:[]});
@@ -57,4 +58,11 @@ test('authenticated claim plans validate against fresh ESPN reads, persist, and 
   assert.equal((await (await call()).json()).processedReport.totalPaid,31);
   assert.equal((await call({...plan,version:2})).status,409);
   assert.equal((await outcome({...report,save:true,text:report.text.replace('Added. F dropped Fixture drop, BUF WR to Waivers.','Unsuccessful. Reason: Player has already been added to another team.')})).status,409);
+  pendingTransactions=[{id:'direct-claim',teamId:9,scoringPeriodId:3,type:'WAIVER',status:'PENDING',isPending:true,bidAmount:2,items:[{type:'ADD',playerId:34},{type:'DROP',playerId:10}]}];
+  db.exec("DELETE FROM api_cache WHERE cache_key LIKE 'espn:activity:%'");
+  const direct=await (await outcome()).json();
+  assert.equal(direct.activity.pending.rows[0].playerName,'Outside worksheet');
+  assert.equal(direct.activity.pending.rows[0].dropName,'Fixture drop');
+  assert.equal(direct.activity.identityCoverage.unresolved,0);
+  assert.equal(direct.plan.claims.some(p=>p.addId==='34'),false,'names do not require a saved worksheet');
 });

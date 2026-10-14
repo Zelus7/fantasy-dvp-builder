@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Command Center · Design preview</title>
+  <link rel="stylesheet" href="./preview.css">
+  <script src="./preview.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to decisions</a>
+  <div class="preview-note">Design preview · Fictional players and sample numbers · No ESPN actions</div>
+  <aside class="rail">
+    <a class="brand" href="#dashboard"><span class="brand-mark" aria-hidden="true">CC</span><span>Command<br>Center</span></a>
+    <p class="rail-caption">Your weekly advantage</p>
+    <nav aria-label="Main navigation">
+      <a href="#dashboard" data-nav="dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v11h-6v-7H9v7H3Z"/></svg>Dashboard</a>
+      <a href="#waivers" data-nav="waivers"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h6m7-4v8m-4-4h8"/></svg>Waivers</a>
+    </nav>
+    <div class="rail-footer"><p>Two screens for review.<br>The current app is unchanged.</p><a href="/">Return to the live app ↗</a></div>
+  </aside>
+  <main id="main" tabindex="-1">
+    <header class="page-top"><div><p class="context">Sample league / Sample team</p><p class="week">Week 6 <span>· Wednesday</span></p></div><button class="quiet" id="about">About this preview</button></header>
+    <section id="dashboard" aria-labelledby="dashboard-title">
+      <div class="page-heading"><div><h1 id="dashboard-title">Your Week 6 decisions.</h1><p>What matters this week, in order of urgency.</p></div><span class="week-tag">Oct 14–20 · Sample</span></div>
+      <details class="freshness"><summary><span class="status-dot"></span>Roster current <span class="divider">/</span> Injury check needed <span class="source-link">Source details</span></summary><div class="source-grid"><p><strong>Roster & availability</strong>Sample: checked 2 minutes ago.</p><p><strong>Practice reports</strong>Sample: Wednesday report missing. A questionable tag is not a prediction.</p><p><strong>Claim results</strong>Sample: processed feed incomplete. Missing records do not mean no claims.</p></div></details>
+      <div class="dashboard-grid">
+        <article class="decision">
+          <p class="decision-label"><span aria-hidden="true">01</span> Your next decision</p>
+          <h2>One starter<br>to watch.</h2>
+          <p>Avery Foster is questionable. If he sits, your best available RB cover is 2.3 points better than your current backup.</p>
+          <div class="decision-player"><span class="team-mark sea" aria-hidden="true">SEA</span><div><strong>Avery Foster</strong><span>RB · Questionable · Sun 4:25 PM</span></div><span class="tag amber">Check practice</span></div>
+          <a class="primary" href="#waivers">Review injury cover <span aria-hidden="true">→</span></a>
+          <p class="decision-foot">Conditional benefit, not a reason to bench a healthy starter.</p>
+        </article>
+        <aside class="week-brief" aria-labelledby="brief-title"><h2 id="brief-title">The week at a glance</h2><dl><div><dt>Starting slots filled</dt><dd>9<span>/9</span></dd></div><div><dt>Availability to confirm</dt><dd>1<span> starter</span></dd></div><div><dt>FAAB remaining</dt><dd>$197<span> sample</span></dd></div></dl><p>Being projected to start doesn’t mean a player is cleared to play.</p></aside>
+        <section class="decision-list" aria-labelledby="later-title"><div class="section-title"><h2 id="later-title">Then, keep an eye on</h2><span>Two follow-ups</span></div><article class="follow-up"><span class="step">02</span><div><h3>Keep the stronger starting lineup</h3><p>No sample waiver move clears the evidence bar for an immediate paid upgrade. Holding is a valid decision.</p></div><span class="tag teal">Hold</span></article><article class="follow-up"><span class="step">03</span><div><h3>Revisit the insurance spot after Sunday</h3><p>If Foster is cleared, compare the bench spot with next week’s bye coverage. Don’t turn a one-week bridge into an automatic season-long hold.</p></div><span class="tag">Next week</span></article></section>
+        <section class="claim-brief"><div class="section-title"><h2>After waivers</h2><span class="tag amber">Partial feed</span></div><p class="result-line"><span class="team-mark kc" aria-hidden="true">KC</span><span><strong>Kansas City D/ST</strong><small>Won · $3 · Sample result</small></span><span class="check" aria-label="Confirmed">✓</span></p><p class="muted">Only confirmed results appear here. Older worksheets stay in the audit trail.</p><a class="text-link" href="#waivers?section=claims">Review claims & results →</a></section>
+      </div>
+    </section>
+    <section id="waivers" aria-labelledby="waivers-title" hidden>
+      <div class="page-heading"><div><h1 id="waivers-title">Find a reason to move.</h1><p>A better lineup. A real contingency. Or a confident hold.</p></div><span class="week-tag">$197 sample FAAB</span></div>
+      <div class="waiver-toolbar"><div class="segmented" role="group" aria-label="Recommendation horizon"><button data-period="week" aria-pressed="true">This week</button><button data-period="bridge" aria-pressed="false">Next 4 weeks</button><button data-period="ros" aria-pressed="false">Rest of season</button></div><label class="search"><span>Find a player</span><input type="search" id="search" name="playerSearch" placeholder="Name or team" autocomplete="off"></label></div>
+      <div class="filter-line"><div role="group" aria-label="Position filter"><button class="filter" data-position="All" aria-pressed="true">All</button><button class="filter" data-position="RB" aria-pressed="false">RB</button><button class="filter" data-position="WR" aria-pressed="false">WR</button><button class="filter" data-position="TE" aria-pressed="false">TE</button><button class="filter" data-position="QB" aria-pressed="false">QB</button><button class="filter" data-position="D/ST" aria-pressed="false">D/ST</button><button class="filter" data-position="K" aria-pressed="false">K</button></div><p id="result-count" aria-live="polite"></p></div>
+      <p class="horizon-note" id="horizon-note"></p>
+      <div class="waiver-layout"><div><div class="section-title"><h2 id="target-heading">Worth your attention</h2><span>Compared with holding</span></div><div id="targets"></div><div id="empty" class="empty" hidden><h3>No sample targets match.</h3><p>Try another position or clear your search. The app should never fill this space with meaningless zero-gain adds.</p><button class="quiet" id="clear-filters">Clear filters</button></div></div>
+        <aside class="decision-guide"><h2>How to read this</h2><p><strong>Lineup gain</strong> is the difference between your best legal lineup after the add/drop and your best lineup if you do nothing.</p><p><strong>Injury cover</strong> repeats that comparison with one named starter unavailable. It is not added to the normal projection.</p><p><strong>FAAB guidance</strong> is a spending policy, not the amount guaranteed to win. No paid bid is recommended in this sample.</p><details><summary>What happened to “Waiver Edge”?</summary><p>The new design favors plain labels: lineup gain, contingency benefit, and future cost. One opaque score should not combine different kinds of value.</p></details></aside>
+      </div>
+      <section class="claims-panel" id="claims"><div class="section-title"><h2>Claims & results</h2><span class="tag amber">Sample · Incomplete feed</span></div><p>No pending claims can be confirmed from this sample read. That is different from a verified empty list.</p><p class="result-line"><span class="team-mark kc" aria-hidden="true">KC</span><span><strong>Kansas City D/ST</strong><small>Won · Paid $3 · Week 6</small></span><span class="check" aria-label="Confirmed">✓</span></p><details><summary>Older worksheets & source coverage</summary><p>Previous-week plans belong here, with their original dates, bids, and evidence. They are not instructions to repeat old claims.</p></details></section>
+    </section>
+    <footer class="page-footer">Built for decisions, not transactions. This preview reads no live data and sends no claims or offers.</footer>
+  </main>
+  <dialog id="preview-dialog" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">A preview, not a transaction</h2><button id="close-dialog" class="quiet" aria-label="Close preview message">Close</button></div><p id="dialog-message"></p><button id="dialog-done" class="primary">Got it</button></dialog>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+</body>
+</html>
