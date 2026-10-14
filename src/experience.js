@@ -18,6 +18,7 @@ import {readClaimPlan,saveClaimPlan} from './claim-plan-store.js';
 import {reviewOfferReport,reconcileClaimPlan} from './claim-outcomes.js';
 import {readClaimOutcomes,saveClaimReceipt} from './claim-outcome-store.js';
 import {readActivity,activitySummary} from './waiver-activity.js';
+import {resolvePlayerIdentities} from './player-identities.js';
 import {intelligenceCoverage,playerIntelligence} from './intelligence.js';
 
 const nowIso=()=>new Date().toISOString();
@@ -179,10 +180,12 @@ export async function handleExperience(request,env) {
     let activity;
     try{
       const synced=await fetchWaiverActivity(env,league,{force:opts.force}),archive=await readActivity(env,league);
-      const known=[...allLeaguePlayers(state.bundle),...history.flatMap(h=>h.plan.claims.flatMap(c=>[{playerId:c.addId,name:c.addName},{playerId:c.dropId,name:c.dropName}])).filter(p=>p.playerId&&p.name)];
-      activity=activitySummary(synced,archive,league,known,state.bundle.teams,plan,state.team.roster,state.bundle.cache);
+      const seeds=[...history.flatMap(h=>h.plan.claims.flatMap(c=>[{playerId:c.addId,name:c.addName},{playerId:c.dropId,name:c.dropName}])),...allLeaguePlayers(state.bundle)];
+      const rows=[...(synced.pending.rows||[]),...archive.rows.filter(r=>String(r.teamId)===String(league.teamId))];
+      const identities=await resolvePlayerIdentities(env,league,seeds,rows.flatMap(r=>[r.playerId,r.dropId]));
+      activity={...activitySummary(synced,archive,league,identities.players,state.bundle.teams,plan,state.team.roster,state.bundle.cache),identityCoverage:identities.coverage};
     }catch{activity={error:'Automatic ESPN claim sync is unavailable. Saved reports and roster observations remain available.'};}
-    return json({plan,review:reconcileClaimPlan(plan,state.team.roster,state.bundle.cache,currentReceipt),history,activity,
+    return json({plan,planContext:{week:plan.week,currentWeek:league.liveWeek||league.currentWeek,historical:Number(plan.week)!==Number(league.liveWeek||league.currentWeek)},review:reconcileClaimPlan(plan,state.team.roster,state.bundle.cache,currentReceipt),history,activity,
       remainingFaab:state.bundle.cache.stale?null:state.team.acquisition?.remaining,espnUrl,submissionEnabled:false,
       explanation:'Roster observations, imported reports and direct ESPN records are separate evidence. A saved worksheet is not proof of submission. Automatic sync never submits, changes or cancels a claim.'});
   }
@@ -263,7 +266,7 @@ export async function handleExperience(request,env) {
     if(free.cache?.stale&&(body.yourAddIds?.length||body.theirAddIds?.length))throw new HttpError(409,'DATA_NOT_READY','Refresh free-agent availability before evaluating an extra acquisition.');
     return json(evaluateTradePlan(state.team.roster.map(p=>byId.get(String(p.playerId))),theirs.roster.map(p=>byId.get(String(p.playerId))),body.giveIds||[],body.receiveIds||[],{
       mode:body.mode||'bridge',currentWeek:state.bundle.league.currentWeek,effectiveWeek:body.effectiveWeek==null?state.bundle.league.currentWeek:Number(body.effectiveWeek),endWeek:Math.min(18,Math.max(...(state.settings.fantasyPlayoffWeeks||[15,16,17]))),now:Date.now(),
-      slots:state.bundle.league.lineupSlotCounts,rosterCapacity:state.bundle.league.rosterSize,schedules:await outlook(env,state,pool,ctx),protectedIds:state.preferences.protectedIds||[],
+      slots:state.bundle.league.lineupSlotCounts,rosterCapacity:state.bundle.league.rosterSize,schedules:await outlook(env,state,pool,ctx),protectedIds:state.preferences.protectedIds||[],leagueTeams:state.bundle.teams.map(t=>({roster:t.roster.map(p=>byId.get(String(p.playerId)))})),
       freeAgents:free.players.map(p=>byId.get(String(p.playerId))),yourDropIds:body.yourDropIds,theirDropIds:body.theirDropIds,yourAddIds:body.yourAddIds,theirAddIds:body.theirAddIds}));
   }
   throw new HttpError(405,'METHOD_NOT_ALLOWED','This action is not supported.');

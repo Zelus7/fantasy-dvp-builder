@@ -41,7 +41,8 @@ test('preferences, visit history and advice gates use the real schema behind aut
   assert.match((await (await trade({otherTeamId:'2',giveIds:['10'],receiveIds:['20']})).json()).reason,/protected/);
   await request('/api/preferences',{protectedIds:[],watchlistIds:[]});
   const evaluated=await (await trade({otherTeamId:'2',giveIds:['10'],receiveIds:['20'],mode:'week'})).json();
-  assert.equal(evaluated.method,'calendar-roster-fit-v1');assert.equal(evaluated.window.count,1);assert.equal(evaluated.viable,false);
+  assert.equal(evaluated.method,'calendar-roster-fit-v2');assert.equal(evaluated.window.count,1);assert.equal(evaluated.viable,false);
+  assert.equal(evaluated.valueReview.context.teamCount,2);assert.equal(evaluated.valueReview.marketVerified,false);
   assert.equal((await request('/api/decision-history?snapshotWeek=99')).status,400);
   const snapshot=await freezeDecision(env,league,{waiversReady:true,roster,freeAgents:[{playerId:'11',name:'Candidate',evidence:'Synthetic evidence '.repeat(200)}],settings:{currentWeek:1,mode:'week',now:Date.now()}},{});
   const stored=db.prepare('SELECT inputs_json FROM decision_snapshots WHERE id=?').get(snapshot.id).inputs_json;

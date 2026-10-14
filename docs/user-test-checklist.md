@@ -3,8 +3,31 @@
 Open https://fantasy-command-center.acarvall87.workers.dev/ on your phone.
 These checks do not require reinstalling or pairing the connector again.
 
-For the October 7 evidence-review release, start with the focused
-[waiver review checks](waiver-review-quality.md#verification-and-user-checks).
+## October 14 identity, contingency and trade review
+
+- [ ] Open Dashboard or Waivers and refresh outcomes. Names should appear for
+  claims created directly in ESPN, including defenses and unrostered players.
+  An unresolved name is explicitly unavailable, with its ID secondary.
+- [ ] Current-week results should be separate from older worksheets and reports.
+  Expand the dated archive to inspect history. A stale pending feed must not
+  be presented as a confirmed empty queue or a freshly submitted claim.
+- [ ] On an injury-cover target, read the named trigger and benefit versus the
+  backups already owned. The normal-lineup gain must remain separate. With
+  adequate cover already rostered, useless zero-gain adds should disappear.
+- [ ] In Trades, expand the exchange-value explanation. Check both teams'
+  weekly lineups, required extra drops, positional replacement levels and
+  package imbalance. These are screens, not market prices or acceptance odds.
+- [ ] Open [the separate design preview](https://fantasy-command-center.acarvall87.workers.dev/design-preview/).
+  Try Dashboard, Waivers, horizon/position filters, search and disclosures on
+  your phone. All players and numbers are illustrative; no button sends a claim.
+  Approve or revise this direction before the production visual overhaul.
+
+The design review used Anthropic's frontend-design skill (dbd4588f9e10) and
+Vercel's web-design-guidelines skill (063bee94c3f4). They guided the mobile
+information hierarchy, semantic controls, focus styles, touch targets, source
+disclosures and no-overflow checks. The existing production layout is retained.
+
+## Broader regression checks
 
 - [ ] **Login and resume:** open the app, refresh it, switch away and return.
   You should stay signed in without a login loop. If ESPN later expires, its

@@ -1,5 +1,26 @@
 # Read-only ESPN claim sync
 
+## October 14 identity and history repair
+
+Player names are now retained independently of current roster membership or
+saved worksheets. Unknown own-team claim IDs use bounded, fixed-origin public
+ESPN athlete/team GETs with no session cookies. The cache is league/season
+scoped, atomically merged, and contains only identity fields. It cannot assert
+availability, roster membership, freshness, submission or a successful claim.
+Negative fantasy defense IDs are validated against the known NFL team mapping.
+Lookup failures do not erase normalized transaction evidence.
+
+Pending claims and current-week confirmed results lead the UI. Older worksheet
+follow-ups and imported reports are dated and collapsed. Missing/ambiguous
+pending and processed feeds retain their stale/partial labels; this release
+does not reinterpret PENDING or CANCELED records as completed outcomes.
+
+The October 14 diagnostic read found an omitted pending list and ambiguous
+PENDING/CANCELED records in the processed feed. This is a real coverage limit,
+not permission to manufacture an empty list or inferred winning bid.
+
+## Original sync behavior
+
 This release automatically reads pending claims on Dashboard/Waivers load and
 processed offers for the current and previous two scoring periods. Results use
 the existing encrypted ESPN connection; no new permissions or connector install

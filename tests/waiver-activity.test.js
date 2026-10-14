@@ -7,6 +7,13 @@ import {historicalBidContext} from '../src/waiver-market.js';
 import {activityHtml} from '../public/waiver-activity-ui.js';
 import {fetchWaiverActivity} from '../src/espn.js';
 import {saveCredentials} from '../src/db.js';
+
+test('older worksheets are collapsed and unresolved identity IDs are secondary, not player names',()=>{
+  const html=activityHtml({currentWeek:6,planWeek:3,historicalPlan:true,checkedAt:new Date().toISOString(),pending:{status:'fresh',rows:[{playerName:'Player name unavailable',nameMissing:true,playerId:'21',bid:1}]},processed:{status:'partial',weeks:[]},outcomes:[],claims:[{addName:'Old target',status:'unresolved',next:'Do not repeat.'}],recentSpend:0});
+  assert.match(html,/<details data-activity><summary>Archived worksheet follow-up · Week 3/);
+  assert.match(html,/Player name unavailable <small>\(ESPN ID 21\)/);assert.doesNotMatch(html,/Player 21/);
+  assert.ok(html.indexOf('Your pending claims')<html.indexOf('Sync coverage & limitations'));
+});
 const league={leagueId:'1',seasonYear:2026,teamId:'9',currentWeek:3};
 const tx={id:'claim-1',teamId:9,scoringPeriodId:3,type:'WAIVER',status:'EXECUTED',isPending:false,bidAmount:31,processDate:Date.now()-1000,items:[{type:'ADD',playerId:21},{type:'DROP',playerId:10}]};
 const body=(transactions)=>({id:1,seasonId:2026,transactions});
