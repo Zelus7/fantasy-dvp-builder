@@ -54,7 +54,7 @@ effects from the preview.
 - Local CI: 240 Node tests passed, Worker dry-run and secret scan passed.
 - Chrome: 390×844 and 320×740, no horizontal overflow; both candidates fit
   above the bottom navigation without scrolling. At 390px their summary bottoms
-  were 359px and 488px in the first measurement.
+  were 377px and 506px with the page at scroll position zero.
 - Search, position/empty state, future-horizon labels, URL-preserved expansion,
   keyboard Enter expansion, dialog Escape and focus return checked.
 - Expanded comparison moved ahead of the long action explanation after visual
