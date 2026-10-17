@@ -70,8 +70,9 @@ test('offline repair is lossless, bounded and idempotent and protects full ancho
   const data=fixture();
   for(let i=0;i<3;i++){
     data.settings.now=i;const raw=JSON.stringify(data);
-    db.prepare('INSERT INTO decision_snapshots (id,league_id,season,week,mode,method,created_at,inputs_json,input_hash,result_json) VALUES (?,?,?,?,?,?,?,?,?,?)').run(`s${i}`,'1',2026,6,'week','method',`2026-10-17T01:00:0${i}Z`,await encodeSnapshot(raw),await sha256(raw),'{}');
+    db.prepare('INSERT INTO decision_snapshots (id,league_id,season,week,mode,method,created_at,inputs_json,input_hash,result_json) VALUES (?,?,?,?,?,?,?,?,?,?)').run(`s${i}`,'1',2026,6,'week','method',`2020-10-16T01:00:0${i}Z`,await encodeSnapshot(raw),await sha256(raw),'{}');
   }
+  for(let i=3;i<5;i++){data.settings.now=i;const current=JSON.stringify(data);db.prepare('INSERT INTO decision_snapshots (id,league_id,season,week,mode,method,created_at,inputs_json,input_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(`live-anchor-${i}`,'1',2026,6,'week','method',new Date().toISOString(),await encodeSnapshot(current),await sha256(current));}
   db.close();copyFileSync(source,target);
   const run=(...args)=>spawnSync(process.execPath,['scripts/deduplicate-decision-snapshots.mjs',...args],{encoding:'utf8'});
   const prepared=run('prepare',source,out);assert.equal(prepared.status,0,prepared.stderr);
@@ -79,7 +80,7 @@ test('offline repair is lossless, bounded and idempotent and protects full ancho
   const next=new DatabaseSync(target);
   for(const entry of manifest.entries){const sql=readFileSync(join(out,entry.file),'utf8');for(const s of sql.split(';\n'))assert.ok(Buffer.byteLength(s)<100000);next.exec(sql);next.exec(sql);}
   next.close();const verified=run('verify',source,target);assert.equal(verified.status,0,verified.stderr);
-  assert.equal(JSON.parse(verified.stdout).verifiedSnapshots,3);
+  assert.equal(JSON.parse(verified.stdout).verifiedSnapshots,5);
   assert.notEqual(run('prepare',target,join(dir,'again')).status,0,'an existing manifest resumes; never rewrite referenced anchors');
   const corrupt=new DatabaseSync(target);corrupt.prepare('UPDATE decision_snapshots SET inputs_json=? WHERE id=?').run('{}','s0');corrupt.close();
   assert.notEqual(run('verify',source,target).status,0);

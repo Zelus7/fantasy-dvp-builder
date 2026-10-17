@@ -38,10 +38,12 @@ try{
     // repeated prepare is intentionally a no-op: no chains or anchor rewriting.
     if(rows.some(row=>row.inputs_json.startsWith(DELTA_PREFIX)))throw new Error('Archive already contains deltas; use the existing manifest to resume, then verify.');
     const directory=resolve(target);await mkdir(directory,{recursive:true,mode:0o700});
-    const anchors=new Map(),entries=[];let beforeBytes=0,afterBytes=0;
+    const anchors=new Map(),entries=[],today=new Date().toISOString().slice(0,10);let beforeBytes=0,afterBytes=0;
     for(const row of rows){
       const raw=await decodeSnapshot(row.inputs_json,row.input_hash),key=`${row.league_id}:${row.season}:${row.method}:${row.created_at.slice(0,10)}`;
-      const base=anchors.get(key),stored=base?await encodeDeltaSnapshot(raw,base):row.inputs_json;
+      // Live writers reference only today's full anchors. Never transform this
+      // day's rows, even if a writer starts using one after this export was taken.
+      const base=anchors.get(key),stored=base&&row.created_at.slice(0,10)<today?await encodeDeltaSnapshot(raw,base):row.inputs_json;
       beforeBytes+=Buffer.byteLength(row.inputs_json);afterBytes+=Buffer.byteLength(stored);
       if(!stored.startsWith(DELTA_PREFIX)){anchors.set(key,baseRow(row));continue;}
       if(await decodeSnapshot(stored,row.input_hash,{loadBase:async id=>id===base.id?base:null})!==raw)throw new Error('Delta roundtrip failed');

@@ -58,7 +58,8 @@ same-model full anchor, only using a delta when it saves at least 10%. The total
 128 MiB archive limit still applies, counting anchors and deltas alike.
 
 Use `scripts/deduplicate-decision-snapshots.mjs prepare before.sqlite output-dir`
-on a verified backup. Rehearse every manifest SQL file twice on a copy, then run
+on a verified backup. Today's full rows are never transformed because a concurrent
+live writer may reference them after the export. Rehearse every manifest SQL file twice on a copy, then run
 `verify before.sqlite after.sqlite`. Deploy the compatible reader BEFORE applying
 any production SQL. Pilot one row, verify its original hash, then apply the
 remaining manifest in bounded batches. The conditional updates are restartable;
