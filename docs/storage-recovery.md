@@ -45,3 +45,35 @@ still need capacity monitoring. No paid upgrade or historical deletion is automa
 Keep the original backup. Never restore it wholesale over newer production activity
 without a separate recovery decision. For interrupted staging, reapply that row's
 SQL file; it resets only that temporary payload and preserves historical metadata.
+
+## No-cost shared snapshots (October 17, 2026)
+
+R2 is not enabled on this account. Do not activate billing or upgrade a plan for
+this repair. `fcc:delta:v1:` stores changed JSON values relative to one existing
+full snapshot in the same league and season. Full anchors stay immutable and
+independently readable. There are no delta chains. Both the base hash and exact
+reconstructed input hash are checked; the original decision ID, timestamp,
+method, results and receipts do not change. New writes choose a same-day,
+same-model full anchor, only using a delta when it saves at least 10%. The total
+128 MiB archive limit still applies, counting anchors and deltas alike.
+
+Use `scripts/deduplicate-decision-snapshots.mjs prepare before.sqlite output-dir`
+on a verified backup. Today's full rows are never transformed because a concurrent
+live writer may reference them after the export. Rehearse every manifest SQL file twice on a copy, then run
+`verify before.sqlite after.sqlite`. Deploy the compatible reader BEFORE applying
+any production SQL. Pilot one row, verify its original hash, then apply the
+remaining manifest in bounded batches. The conditional updates are restartable;
+resume the SAME manifest, never re-prepare an already converted archive. Export
+and verify production afterward, including every original record and receipt.
+The older gzip-only compactor must not be used on a delta archive. Never roll
+back to a reader that cannot resolve deltas.
+
+The October 17 offline rehearsal preserved all 611 snapshots and 93 immutable
+history rows, reducing stored inputs from 133,871,960 to 61,663,132 bytes. This is
+logical space available for reuse, not a promise that allocated database bytes
+immediately shrink. Other tables can still grow; capacity monitoring and the
+hard archive stop remain necessary. This is not unlimited storage.
+
+Pipeline verification now distinguishes advice readiness from archive failure,
+and prints bounded safe diagnostics before failing. Do not suppress a genuine
+archive failure merely to silence notification emails.
