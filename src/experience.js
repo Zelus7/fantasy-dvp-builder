@@ -11,8 +11,7 @@ import {fetchNews} from './news.js';
 import {STARTER_SLOT_IDS} from './constants.js';
 import {planWaivers,injuryHolds,WAIVER_METHOD} from './waiver-plan.js';
 import {attachInjuryEvidence,validateInjuryEvidence} from './injury-evidence.js';
-import {freezeDecision,decisionHistoryPage} from './decision-store.js';
-import {readSnapshot} from './snapshot-codec.js';
+import {freezeDecision,decisionHistoryPage,readStoredSnapshot} from './decision-store.js';
 import {validateClaimPlan} from './claim-plan.js';
 import {readClaimPlan,saveClaimPlan} from './claim-plan-store.js';
 import {reviewOfferReport,reconcileClaimPlan} from './claim-outcomes.js';
@@ -150,8 +149,8 @@ export async function buildOpportunities(env,opts={}) {
   const trades=!opts.clientCompute&&opts.includeTrades&&ctx.adviceReady?discoverTradePlans(teams,state.team.id,settings):[];
   const emerging=!opts.clientCompute&&ctx.adviceReady&&!free.cache?.stale?emergingWaiverTargets(agents,roster,settings):[];
   const calculationInput={roster,freeAgents:agents,teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):[],yourTeamId:state.team.id,settings,position:opts.position,includeTrades:opts.includeTrades,adviceReady:ctx.adviceReady,waiversReady:ctx.adviceReady&&!free.cache?.stale};
-  let snapshot=null,snapshotWarning=null;try{snapshot=await freezeDecision(env,state.bundle.league,calculationInput,ctx.freshness)}catch(error){snapshotWarning=error.code==='SNAPSHOT_STORAGE_BUDGET'?'The decision archive reached its storage safety limit. Existing history is preserved and current recommendations remain available, but this visit will not count toward model validation.':'This decision could not be archived; it will not count toward model validation.'}
-  return {generatedAt:nowIso(),method:WAIVER_METHOD,snapshot,snapshotWarning,market:{...settings.market,teams:undefined},league:state.bundle.league,mode,recommendations,trades,holds:!opts.clientCompute&&calculationInput.waiversReady?injuryHolds(roster,agents,settings):[],adviceReady:calculationInput.waiversReady,freshness:{...ctx.freshness,waivers:sourceFreshness(free.cache?.updatedAt,300,{status:free.cache?.stale?'stale':'fresh',coverage:free.coverage})},
+  let snapshot=null,snapshotWarning=null,archiveReason=null;try{snapshot=await freezeDecision(env,state.bundle.league,calculationInput,ctx.freshness);if(!snapshot)archiveReason='DATA_NOT_READY';}catch(error){archiveReason=error.code==='SNAPSHOT_STORAGE_BUDGET'?error.code:'SNAPSHOT_WRITE_FAILED';snapshotWarning=error.code==='SNAPSHOT_STORAGE_BUDGET'?'The decision archive reached its storage safety limit. Existing history is preserved and current recommendations remain available, but this visit will not count toward model validation.':'This decision could not be archived; it will not count toward model validation.'}
+  return {generatedAt:nowIso(),method:WAIVER_METHOD,snapshot,snapshotWarning,archiveReason,market:{...settings.market,teams:undefined},league:state.bundle.league,mode,recommendations,trades,holds:!opts.clientCompute&&calculationInput.waiversReady?injuryHolds(roster,agents,settings):[],adviceReady:calculationInput.waiversReady,freshness:{...ctx.freshness,waivers:sourceFreshness(free.cache?.updatedAt,300,{status:free.cache?.stale?'stale':'fresh',coverage:free.coverage})},
     emerging,reviewCoverage:waiverReviewCoverage(agents,recommendations),tradeFreeAgents:opts.includeTrades?agents.map(({playerId,name,position,status})=>({playerId,name,position,status})):undefined,
     teams:opts.includeTrades?teams.map(t=>({id:t.id,name:t.name,roster:t.roster})):undefined,
     calculationInput:opts.clientCompute?calculationInput:undefined,
@@ -214,7 +213,7 @@ export async function handleExperience(request,env) {
   if(path==='/api/decision-feedback'&&request.method==='POST'){
     const state=await resolve(env,opts),body=await requestObject(request),row=await env.DB.prepare('SELECT inputs_json AS inputsJson,input_hash AS inputHash FROM decision_snapshots WHERE id=? AND league_id=? AND season=?').bind(String(body.id),String(state.league.leagueId),state.league.seasonYear).first();
     if(!row)throw new HttpError(404,'SNAPSHOT_NOT_FOUND','Decision snapshot not found.');
-    const inputs=await readSnapshot(row.inputsJson,row.inputHash),cost=body.cost===''||body.cost==null?null:Number(body.cost);
+    const inputs=await readStoredSnapshot(env,state.league,row),cost=body.cost===''||body.cost==null?null:Number(body.cost);
     if(!['acquired','missed','skipped'].includes(body.status)||body.status==='acquired'&&!body.playerId||cost!=null&&(!Number.isInteger(cost)||cost<0||cost>100000)||body.playerId&&!inputs.freeAgents.some(p=>p.playerId===String(body.playerId)))throw new HttpError(400,'INVALID_FEEDBACK','Choose a valid claim outcome, player and nonnegative whole-dollar cost.');
     const feedback={status:body.status,playerId:body.playerId||null,cost:body.status==='acquired'?cost:null,at:nowIso(),source:'User reported; not independently verified in ESPN'};
     await env.DB.prepare('UPDATE decision_snapshots SET result_json=? WHERE id=?').bind(JSON.stringify(feedback),String(body.id)).run();return json({saved:true});
@@ -227,7 +226,7 @@ export async function handleExperience(request,env) {
   if(path==='/api/decision-replay'&&request.method==='GET'){
     const state=await resolve(env,opts),row=await env.DB.prepare('SELECT method,inputs_json AS inputsJson,input_hash AS inputHash,week FROM decision_snapshots WHERE id=? AND league_id=? AND season=?').bind(url.searchParams.get('id')||'',String(state.league.leagueId),state.league.seasonYear).first();
     if(!row)throw new HttpError(404,'SNAPSHOT_NOT_FOUND','Decision snapshot not found.');
-    const inputs=await readSnapshot(row.inputsJson,row.inputHash),players=[...inputs.roster,...inputs.freeAgents];
+    const inputs=await readStoredSnapshot(env,state.league,row),players=[...inputs.roster,...inputs.freeAgents];
     const completedWeek=row.week<state.bundle.league.liveWeek,actuals=completedWeek?await fetchHistoricalPlayerScores(env,state.league,row.week,players.map(p=>p.playerId)):{};
     const features=completedWeek?await getPlayerFeatureLookup(env,state.league.leagueId,state.league.seasonYear,players.map(p=>p.playerId)):{};
     const observedUsage=Object.fromEntries(Object.entries(features).map(([id,f])=>[id,(f.opportunity?.weeklyUsage||[]).filter(w=>Number(w.week)===row.week)]));

@@ -320,9 +320,10 @@ def main()->int:
                 detail='non-JSON response'
             raise RuntimeError(f'Live verification failed ({verification.status_code}): {detail}')
         result=verification.json()
-        if not result.get('adviceReady') or not result.get('snapshotSaved'):
-            raise RuntimeError('Published data, but live decision readiness or snapshot verification failed')
         print(json.dumps({'liveVerification':result}))
+        if not result.get('adviceReady') or not result.get('snapshotSaved'):
+            reason=result.get('archiveReason') or 'see liveVerification source coverage'
+            raise RuntimeError(f'Published data; adviceReady={bool(result.get("adviceReady"))}, snapshotSaved={bool(result.get("snapshotSaved"))}; {reason}')
     return 0
 if __name__=='__main__':
     try: raise SystemExit(main())

@@ -1,9 +1,15 @@
 import {sha256} from './security.js';
 import {WAIVER_METHOD} from './waiver-plan.js';
-import {encodeSnapshot} from './snapshot-codec.js';
+import {encodeDeltaSnapshot,readSnapshot,DELTA_PREFIX} from './snapshot-codec.js';
 
 // Stop archiving before snapshots crowd out operational data. Never evict history.
 export const DECISION_STORAGE_BUDGET=128*1024*1024;
+
+export function snapshotReader(env,league){
+  return {loadBase:id=>env.DB.prepare('SELECT inputs_json AS inputsJson,input_hash AS inputHash FROM decision_snapshots WHERE id=? AND league_id=? AND season=?')
+    .bind(id,String(league.leagueId),league.seasonYear).first()};
+}
+export async function readStoredSnapshot(env,league,row){return readSnapshot(row.inputsJson,row.inputHash,snapshotReader(env,league));}
 
 export async function freezeDecision(env,league,input,freshness){
   if(!input.waiversReady)return null;
@@ -21,7 +27,10 @@ export async function freezeDecision(env,league,input,freshness){
   const id=await sha256(JSON.stringify({bucket,position:input.position||'',roster:input.roster,freeAgents:input.freeAgents,settings:stableSettings,market:stableMarket,method:WAIVER_METHOD}));
   const existing=await env.DB.prepare('SELECT id,created_at AS createdAt FROM decision_snapshots WHERE id=?').bind(id).first();
   if(existing)return {...existing,prospective,method:WAIVER_METHOD};
-  const raw=JSON.stringify(inputs),hash=await sha256(raw),stored=await encodeSnapshot(raw),at=new Date().toISOString();
+  const at=new Date().toISOString();
+  const base=await env.DB.prepare('SELECT id,inputs_json AS inputsJson,input_hash AS inputHash FROM decision_snapshots WHERE league_id=? AND season=? AND method=? AND created_at>=? AND substr(inputs_json,1,?)!=? ORDER BY created_at DESC,id DESC LIMIT 1')
+    .bind(String(league.leagueId),league.seasonYear,WAIVER_METHOD,at.slice(0,10),DELTA_PREFIX.length,DELTA_PREFIX).first();
+  const raw=JSON.stringify(inputs),hash=await sha256(raw),stored=await encodeDeltaSnapshot(raw,base);
   // The budget test and insertion are one statement, so concurrent visits cannot overrun it.
   await env.DB.prepare('INSERT OR IGNORE INTO decision_snapshots (id,league_id,season,week,mode,method,created_at,inputs_json,input_hash) SELECT ?,?,?,?,?,?,?,?,? WHERE (SELECT COALESCE(SUM(length(CAST(inputs_json AS BLOB))),0) FROM decision_snapshots)+?<=?')
     .bind(id,String(league.leagueId),league.seasonYear,currentWeek,mode,WAIVER_METHOD,at,stored,hash,new TextEncoder().encode(stored).length,DECISION_STORAGE_BUDGET).run();
