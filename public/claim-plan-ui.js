@@ -3,6 +3,10 @@ import {claimPlanSummary} from './model/claim-plan.js';
 import {recommendationDraftBid} from './waiver-ui.js';
 
 const drafts=new Map();
+window.addEventListener('beforeunload',event=>{
+  if(![...drafts.values()].some(draft=>draft.dirty))return;
+  event.preventDefault();event.returnValue='';
+});
 window.addEventListener('claim-outcomes-saved',event=>{const draft=drafts.get(event.detail?.key);if(draft?.data&&!draft.dirty&&!draft.busy)void load(draft,false);});
 const copy=value=>structuredClone(value);
 const option=(value,label,selected)=>`<option value="${esc(value)}"${String(value)===String(selected)?' selected':''}>${esc(label)}</option>`;
