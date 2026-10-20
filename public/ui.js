@@ -32,8 +32,40 @@ export function rosterRow(p,teams,prefs,recommended=false) {
   return `<article class="roster-row"><span class="slot">${esc(slot(recommended?p.assignedSlotId:p.lineupSlotId))}</span><div>${playerIdentity(p,teams)}<small>${esc(p.injuryStatus||'Status unknown')} · ${locked?'Locked / started':p.game?.kickoff?esc(date(p.game.kickoff)):'Kickoff unavailable'}</small></div><div class="score-strip">${metric('Actual',actualNumber(p.actualPoints))}${metric('ESPN proj.',number(p.projectedPoints))}${metric('Risk score',p.hasEstimate?number(p.decisionScore):'—')}</div>${detail('Player details',`${warnings(p.warnings)}<p>${esc(p.estimateSource)} · ${esc(p.matchupLabel)}</p>${forecastEvidence(p)}${preferenceButtons(p,prefs,true)}`)}</article>`;
 }
 
-export function waiverCard(p,teams,prefs) {
-  return `<article class="card player team-${esc(p.team)}">${playerIdentity(p,teams)}<div class="pill">${esc(p.kind)}${p.kind==='Four-week bridge'?'':` · ${p.mode==='ros'?'Rest of season':p.mode==='bridge'?'Four-week bridge':'This week'}`}</div><h3>${p.drop?`Compare with dropping ${esc(p.drop.name)}`:'Compare with using your open roster slot'}</h3><div class="metric-grid">${metric('Gain vs roster (this week)',signed(p.lineupGain))}${metric(p.mode==='week'?'Gain vs waiver alternative':'Window improvement',signed(p.mode==='week'?p.alternativeGain:p.waiverValue))}${metric(p.mode==='ros'?'Typical week':'Estimate',number(p.horizonEstimate))}</div>${p.waiverAlternative?`<p class="fine">This-week alternative: ${esc(p.waiverAlternative.name)} · ${esc(p.waiverAlternative.status)} · same drop. ${p.mode!=='week'?`${signed(p.alternativeGain)} this-week gain over that option.`:''} Availability and cost are not guaranteed.</p>`:''}${p.review?`<p>${esc(p.review.whyNow)}</p><p class="fine">${esc(p.review.evidenceConfidence)} · ${p.review.spendingSupported?'Supported benefit; review cost':'No automated paid-bid recommendation'}</p>`:''}${p.faab?.available?`<p><strong>Value-policy range $${p.faab.low}–$${p.faab.high}</strong> · not a predicted winning bid</p>`:''}${detail('Why this move?',`${actionPlanDetails(p)}${(p.reasons||[]).map(r=>`<p>${esc(r)}</p>`).join('')}${planDetails(p)}${forecastEvidence(p)}${warnings(p.warnings)}`)}${preferenceButtons(p,prefs)}<button class="secondary" data-plan-player="${esc(p.playerId)}" ${p.review?.critical?'disabled':''}>${p.review?.spendingSupported?'Add to claim plan':'Draft for manual review'}</button></article>`;
+export function waiverSummary(p) {
+  const weekly=!p.mode||p.mode==='week',cover=weekly?p.contingencies?.[0]:null;
+  return {
+    gain:cover?.gain??(weekly?p.lineupGain:p.complete===false?null:p.waiverValue),
+    label:cover?`if ${cover.name} is out`:weekly?'lineup pts this week':p.mode==='bridge'?'lineup pts · 4-week total':'lineup pts · season total',
+    verdict:cover?'Injury cover':p.review?.spendingSupported?'Supported upgrade':p.review?.critical?'Verify before acting':'Watch / compare',
+  };
+}
+
+export function waiverCard(p,teams={},prefs={}) {
+  const brief=waiverSummary(p),drop=p.drop;
+  const cost=drop?`${drop.name} leaves your roster. ${p.dropCostComplete===false||p.dropCost==null?'Future starter loss is not fully known; verify before dropping.':`Dropping him alone costs ${number(p.dropCost)} modeled starter points${p.dropCostWeeks?.length?` in weeks ${p.dropCostWeeks.join(', ')}`:' in the checked near-term window'}. This is already accounted for in the net comparison—not an extra deduction.`}`:'Uses your open roster slot. No player is dropped; you give up the ability to use that spot for another pickup.';
+  return `<details class="decision waiver-decision team-${esc(p.team)}" data-decision="${esc(p.playerId)}">
+    <summary>${playerIdentity(p,teams)}<span class="decision-gain"><strong>${signed(brief.gain)}</strong><small>${esc(brief.label)}</small></span>
+      <span class="decision-caption"><span class="verdict">${esc(brief.verdict)}</span> · ${drop?`Drop ${esc(drop.name)}`:'Use open roster slot'}${p.contingencies?.length?` · ${signed(p.lineupGain)} normal-lineup gain`:''}</span>
+    </summary>
+    <div class="decision-body">
+      <div class="comparison-strip"><div><small>${drop?'You give up':'Roster cost'}</small><strong>${esc(drop?.name||'Open roster slot')}</strong>${drop?`<small>${esc(drop.position||'')} · ${number(drop.median)} selected-week estimate</small>`:''}</div><span class="compare-arrow" aria-hidden="true">→</span><div><small>You add</small><strong>${esc(p.name)}</strong><small>${number(p.median)} selected-week estimate</small></div></div>
+      <h3>${drop?`Compare with dropping ${esc(drop.name)}`:'Compare with using your open roster slot'}</h3>
+      <p>${esc(p.review?.whyNow||'Review the full legal-lineup comparison before deciding.')}</p>
+      <div class="metric-grid">${metric('Normal-lineup gain this week',signed(p.lineupGain))}${metric(p.mode==='week'||!p.mode?'Gain vs waiver alternative':'Window improvement',signed(p.mode==='week'||!p.mode?p.alternativeGain:p.complete===false?null:p.waiverValue))}${metric('Selected-week estimate',number(p.median))}</div>
+      <p class="fine">Lineup gain is the change in your best legal starters, not simply the difference between these two players. Future totals are conditional scenarios, not calibrated forecasts.</p>
+      <h4>Who you give up</h4><p>${esc(cost)}</p>
+      ${p.futureCoverageWeeks?.length?warnings([`The move creates additional lineup gaps in weeks ${p.futureCoverageWeeks.join(', ')}. Another pickup would be required.`]):''}
+      ${actionPlanDetails(p)}
+      <h4>What could change the call</h4>
+      <p>${esc(p.review?.reviewTriggers?.[0]||'Recheck availability, the actual drop, and your waiver-processing deadline before acting.')}</p>
+      ${p.review?.missing?.length?`<ul>${p.review.missing.slice(0,3).map(s=>`<li>${esc(s)}</li>`).join('')}</ul>`:''}
+      ${p.faab?.available?`<p><strong>Value-policy range $${p.faab.low}–$${p.faab.high}</strong> · not a predicted winning bid</p>`:'<p class="fine">No supported paid-bid range. A free pickup still has a roster cost.</p>'}
+      ${detail('Full evidence, alternatives & weekly comparison',`${planDetails(p)}${forecastEvidence(p)}${warnings(p.warnings)}`)}
+      ${preferenceButtons(p,prefs)}<button class="primary" data-plan-player="${esc(p.playerId)}" ${p.review?.critical?'disabled':''}>${p.review?.spendingSupported?'Review claim draft':'Draft for manual review'}</button>
+      <p class="fine">Creates an app worksheet only. Nothing is submitted to ESPN.</p>
+    </div>
+  </details>`;
 }
 
 export function tradeCard(t,teams={}) {

@@ -13,5 +13,5 @@ test('extension CORS reflects extension origins only',()=>{
 test('HTML shell does not ship JavaScript template syntax as text',()=>{
   const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
   assert.doesNotMatch(html,/\$\{\['dashboard'/);
-  assert.match(html,/<main><\/main>/);
+  assert.match(html,/<main\b[^>]*><\/main>/);
 });
